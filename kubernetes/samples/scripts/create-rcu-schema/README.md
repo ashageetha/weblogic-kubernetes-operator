@@ -58,16 +58,24 @@ The script assumes that either the image, `container-registry.oracle.com/middlew
 
 ```
 $ ./create-rcu-schema.sh -h
-usage: ./create-rcu-schema.sh -s <schemaPrefix> -t <rcuType> -d <dburl> -i <image> -s <dockerstore> [-h]
-  -s RCU Schema Prefix (required)
+usage: ./create-rcu-schema.sh -s <schemaPrefix> -t <schemaType> -d <dburl> -i <image> -p <docker-store> -n <nameSpace> -q <sysPassword> -r <schemaPassword>  -o <rcuOutputDir>  [-h]
+  -s RCU Schema Prefix (needed)
   -t RCU Schema Type (optional)
-      Supported values: fmw(default),soa,osb,soaosb,soaess,soaessosb
+      (supported values: fmw(default),soa,osb,soaosb,soaess,soaessosb)
   -d RCU Oracle Database URL (optional)
       (default: oracle-db.default.svc.cluster.local:1521/devpdb.k8s)
-  -p Fmw Infrastructure ImagePull Secret (optional)
-      (default: docker-store)
-  -i Fmw Infrastructure Image (optional)
+  -p FMW Infrastructure ImagePull Secret (optional)
+      (default: )
+  -i FMW Infrastructure Image (optional)
       (default: container-registry.oracle.com/middleware/fmw-infrastructure:12.2.1.3)
+  -n Namespace/openshift project where RCU is deployed (optional)
+      (default: default)
+  -q password for SYSDBA user, must be specified.(optional)
+      (default: Oradoc_db1)
+  -r password for schema owner (regular user), must be specified.(optional)
+      (default: Oradoc_db1)
+  -o Output directory for the generated yaml files. (optional)
+      (default: rcuoutput)
   -h Help
 
 $ ./create-rcu-schema.sh -s domain1
@@ -156,11 +164,19 @@ Repository Creation Utility - Create : Operation Completed
 Use this script to drop the RCU schema based `schemaPrefix` and `dburl`.
 
 ```
-$ ./drop-rcu-schema.sh -h
-usage: ./drop-rcu-schema.sh -s <schemaPrefix> -d <dburl>  [-h]
-  -s RCU Schema Prefix (required)
+$ ./drop-rcu-schema.sh  -h
+usage: ./drop-rcu-schema.sh -s <schemaPrefix> -d <dburl> -n <nameSpace> -q <sysPassword> -r <schemaPassword> [-h]
+  -s RCU Schema Prefix (needed)
+  -t RCU Schema Type (optional)
+      (supported values: fmw(default),soa,osb,soaosb,soaess,soaessosb)
   -d Oracle Database URL
       (default: oracle-db.default.svc.cluster.local:1521/devpdb.k8s)
+  -n Namespace/openshift project where RCU is deployed (optional)
+      (default: default)
+  -q password for SYSDBA user, must be specified.(optional)
+      (default: Oradoc_db1)
+  -r password for schema owner (regular user), must be specified.(optional)
+      (default: Oradoc_db1)
   -h Help
 
 $ ./drop-rcu-schema.sh -s domain1
