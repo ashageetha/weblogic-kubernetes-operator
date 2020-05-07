@@ -1,11 +1,12 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.weblogic.domain.model;
 
 import java.util.Arrays;
 
-import io.kubernetes.client.openapi.models.V1EnvVar;
+import io.kubernetes.client.models.V1EnvVar;
+import oracle.kubernetes.weblogic.domain.model.BaseConfiguration;
 import org.junit.Test;
 
 import static org.hamcrest.Matchers.equalTo;

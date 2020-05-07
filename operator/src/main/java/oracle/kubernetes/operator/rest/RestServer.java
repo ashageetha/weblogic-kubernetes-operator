@@ -1,4 +1,4 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.rest;
@@ -53,10 +53,10 @@ public class RestServer {
     SSL_PROTOCOL
   }; // ONLY support TLSv1.2 (by default, we would get TLSv1 and TLSv1.1 too)
   private static RestServer INSTANCE = null;
-  private final RestConfig config;
+  private RestConfig config;
   // private String baseHttpUri;
-  private final String baseExternalHttpsUri;
-  private final String baseInternalHttpsUri;
+  private String baseExternalHttpsUri;
+  private String baseInternalHttpsUri;
   private HttpServer externalHttpsServer;
   private HttpServer internalHttpsServer;
 

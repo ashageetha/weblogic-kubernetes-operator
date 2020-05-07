@@ -1,8 +1,7 @@
 ---
-title: "Cannot pull image"
+title: "Cannot Pull Image"
 date: 2019-03-23T08:08:19-04:00
 draft: false
-weight: 10
 ---
 
 > My domain will not start and I see errors like `ImagePullBackoff` or `Cannot pull image`

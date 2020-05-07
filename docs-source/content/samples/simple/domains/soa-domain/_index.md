@@ -7,7 +7,7 @@ PVC, and the domain resource YAML file for deploying the generated SOA domain."
 ---
 
 {{% notice warning %}}
-Oracle SOA Suite is currently supported only for non-production use in Docker and Kubernetes.  The information provided
+Oracle SOA Suite is currently only supported for non-production use in Docker and Kubernetes.  The information provided
 in this document is a *preview* for early adopters who wish to experiment with Oracle SOA Suite in Kubernetes before
 it is supported for production use.
 {{% /notice %}}
@@ -19,12 +19,13 @@ artifacts of the corresponding domain.
 
 #### Prerequisites
 
-Before you begin, perform the following steps:
+Before you begin, read this document, [Domain resource]({{< relref "/userguide/managing-domains/domain-resource/_index.md" >}}).
 
-* Review the [Domain resource]({{< relref "/userguide/managing-domains/domain-resource/_index.md" >}}) documentation.
-* Review the [system requirements]({{< relref "/userguide/managing-fmw-domains/soa-suite#prerequisites-for-soa-suite-domains" >}}) for deploying Oracle SOA Suite domains on Kubernetes.
+The following prerequisites must be handled prior to running the create domain script:
+
 * Make sure that Kubernetes is set up in the environment. For details, see the [Kubernetes setup guide]({{< relref "/userguide/overview/k8s-setup.md" >}}).
-* Make sure that the WebLogic Kubernetes operator is running. See [Manage operators]({{< relref "/userguide/managing-operators/_index.md" >}}) for operator infrastructure setup and [Install the operator]({{< relref "/userguide/managing-operators/installation/_index.md" >}}) for operator installation. Make sure you install the operator version 2.4.0.
+* Make sure that the WebLogic operator is running. See [Manage operators]({{< relref "/userguide/managing-operators/_index.md" >}}) for operator infrastructure setup and [Install the operator]({{< relref "/userguide/managing-operators/installation/_index.md" >}}) for operator installation.
+* The operator requires SOA Suite 12.2.1.3.0 with patch 29135930 applied. For details on how to obtain or create the image, see [SOA domains]({{< relref "/userguide/managing-domains/soa-suite/_index.md#obtaining-the-soa-suite-docker-image" >}}).
 * Create a Kubernetes namespace (for example, `soans`) for the domain unless you intend to use the default namespace. Use the newly created namespace in all the other steps.
 For details, see [Prepare to run a domain]({{< relref "/userguide/managing-domains/prepare.md" >}}).
 
@@ -38,7 +39,8 @@ Follow the instructions for using the scripts to create a PV and PVC.
 
     * Change the values in the [create-pv-pvc-inputs.yaml](https://github.com/oracle/weblogic-kubernetes-operator/blob/master/kubernetes/samples/scripts/create-weblogic-domain-pv-pvc/create-pv-pvc-inputs.yaml) file based on your requirements.
 
-    * Ensure that the path mentioned for the `weblogicDomainStoragePath` property does exists (if not, you need to create it), has read and write access permissions, and it must be an empty directory.
+    * Ensure that the path for the `weblogicDomainStoragePath` property exists (if not, you need to create it),
+    has full access permissions, and that the folder is empty.
 
 * Create the Kubernetes secrets `username` and `password` of the administrative account in the same Kubernetes
   namespace as the domain. For details, see this [document](https://github.com/oracle/weblogic-kubernetes-operator/blob/master/kubernetes/samples/scripts/create-weblogic-domain-credentials/README.md).
@@ -69,15 +71,57 @@ Follow the instructions for using the scripts to create a PV and PVC.
       uid: a91ef4e1-6ca8-11e9-8143-fa163efa261a
     type: Opaque
     ```
-* Complete the other preliminary required steps documented [here]({{< relref "/userguide/managing-fmw-domains/soa-suite/_index.md" >}}).
 
-#### Prepare to use the create domain script
+* Configure access to your database. For details, see [here]({{< relref "/userguide/managing-fmw-domains/soa-suite/_index.md#configuring-access-to-your-database" >}}).  
+* Create a Kubernetes secret with the RCU credentials. For details, refer to this [document]({{< relref "/userguide/managing-fmw-domains/soa-suite/_index.md#running-the-repository-creation-utility-to-set-up-your-database-schema" >}}).
 
-The sample scripts for Oracle SOA Suite domain deployment are available at `<weblogic-kubernetes-operator-project>/kubernetes/samples/scripts/create-soa-domain`.
+#### Use the script to create a domain
 
-You must edit `create-domain-inputs.yaml` (or a copy of it) to provide the details for your domain.
-Please refer to the configuration parameters below to understand the information that you must
-provide in this file.
+Please note that the sample scripts for SOASuite domain deployment are available at  `<weblogic-kubernetes-operator-project>/kubernetes/samples/scripts/create-soa-domain`.
+  
+Make a copy of the `create-domain-inputs.yaml` file, and run the create script, pointing it at
+your inputs file and an output directory:
+
+```
+$ ./create-domain.sh \
+  -i create-domain-inputs.yaml \
+  -o /<path to output-directory>
+```
+
+The script will perform the following steps:
+
+* Create a directory for the generated Kubernetes YAML files for this domain if it does not
+  already exist.  The path name is `/<path to output-directory>/weblogic-domains/<domainUID>`.
+  If the directory already exists, its contents must be removed before using this script.
+* Create a Kubernetes job that will start up a utility SOA Suite container and run
+  offline WLST scripts to create the domain on the shared storage.
+* Run and wait for the job to finish.
+* Create a Kubernetes domain YAML file, `domain.yaml`, in the directory that is created above.
+  This YAML file can be used to create the Kubernetes resource using the `kubectl create -f`
+  or `kubectl apply -f` command:
+
+    ```
+    $ kubectl apply -f /<path to output-directory>/weblogic-domains/<domainUID>/domain.yaml
+    ```
+
+* Create a convenient utility script, `delete-domain-job.yaml`, to clean up the domain home
+  created by the create script.
+
+If you copy the sample scripts to a different location, make sure that you copy everything in
+the `<weblogic-kubernetes-operator-project>/kubernetes/samples/scripts` directory together
+into the target directory, maintaining the original directory hierarchy.
+
+The default domain created by the script has the following characteristics:
+
+* An Administration Server named `AdminServer` listening on port `7001`.
+* A configured cluster named `soa_cluster-1` of size 5.
+* Two Managed Servers, named `soa_server1` and `soa_server2`, listening on port `8001`.
+* Log files that are located in `/shared/logs/<domainUID>`.
+* SOA Infra, SOA composer and WorklistApp applications deployed.
+* No data sources or JMS resources.
+* A T3 channel.
+
+The domain creation inputs can be customized by editing `create-domain-inputs.yaml`.
 
 #### Configuration parameters
 The following parameters can be provided in the inputs file.
@@ -93,7 +137,7 @@ The following parameters can be provided in the inputs file.
 | `createDomainScriptsMountPath` | Mount path where the create domain scripts are located inside a pod. The `create-domain.sh` script creates a Kubernetes job to run the script (specified in the `createDomainScriptName` property) in a Kubernetes pod to create a domain home. Files in the `createDomainFilesDir` directory are mounted to this location in the pod, so that the Kubernetes pod can use the scripts and supporting files to create a domain home. | `/u01/weblogic` |
 | `createDomainScriptName` | Script that the create domain script uses to create a WebLogic domain. The `create-domain.sh` script creates a Kubernetes job to run this script to create a domain home. The script is located in the in-pod directory that is specified in the `createDomainScriptsMountPath` property. If you need to provide your own scripts to create the domain home, instead of using the built-it scripts, you must use this property to set the name of the script that you want the create domain job to run. | `create-domain-job.sh` |
 | `domainHome` | Home directory of the SOA domain. If not specified, the value is derived from the `domainUID` as `/shared/domains/<domainUID>`. | `/u01/oracle/user_projects/domains/soainfra` |
-| `domainPVMountPath` | Mount path of the domain persistent volume. | `/u01/oracle/user_projects` |
+| `domainPVMountPath` | Mount path of the domain persistent volume. | `/u01/oracle/user_projects/domains` |
 | `domainUID` | Unique ID that will be used to identify this particular domain. Used as the name of the generated WebLogic domain as well as the name of the Kubernetes domain resource. This ID must be unique across all domains in a Kubernetes cluster. This ID cannot contain any character that is not valid in a Kubernetes service name. | `soainfra` |
 | `domainType` | Type of the domain. Mandatory input for SOA Suite domains. You must provide one of the supported domain type values: `soa` (deploys a SOA domain),`osb` (deploys an OSB (Oracle Service Bus) domain),`soaess` (deploys a SOA domain with Enterprise Scheduler (ESS)),`soaosb` (deploys a domain with SOA and OSB), and `soaessosb` (deploys a domain with SOA, OSB, and ESS). | `soa`
 | `exposeAdminNodePort` | Boolean indicating if the Administration Server is exposed outside of the Kubernetes cluster. | `false` |
@@ -117,8 +161,9 @@ The following parameters can be provided in the inputs file.
 | `weblogicImagePullSecretName` | Name of the Kubernetes secret for the Docker Store, used to pull the WebLogic Server image. |   |
 | `serverPodCpuRequest`, `serverPodMemoryRequest`, `serverPodCpuCLimit`, `serverPodMemoryLimit` |  The maximum amount of compute resources allowed, and minimum amount of compute resources required, for each server pod. Please refer to the Kubernetes documentation on `Managing Compute Resources for Containers` for details. | Resource requests and resource limits are not specified. |
 | `rcuSchemaPrefix` | The schema prefix to use in the database, for example `SOA1`.  You may wish to make this the same as the domainUID in order to simplify matching domains to their RCU schemas. | `SOA1` |
-| `rcuDatabaseURL` | The database URL. | `oracle-db.default.svc.cluster.local:1521/devpdb.k8s` |
+| `rcuDatabaseURL` | The database URL. | `soadb.soans:1521/soapdb.my.domain.com` |
 | `rcuCredentialsSecret` | The Kubernetes secret containing the database credentials. | `soainfra-rcu-credentials` |
+
 
 Note that the names of the Kubernetes resources in the generated YAML files may be formed with the
 value of some of the properties specified in the `create-inputs.yaml` file. Those properties include
@@ -131,51 +176,49 @@ The sample demonstrates how to create a SOA Suite domain home and associated Kub
 that has one cluster only. In addition, the sample provides the capability for users to supply their own scripts
 to create the domain home for other use cases. The generated domain YAML file could also be modified to cover more use cases.
 
-#### Run the create domain script
+In addition, you should update the generated `domain.yaml` file by performing the following steps.
 
-Run the create domain script, specifying your inputs file and an output directory to store the
-generated artifacts:
+##### Mandatory Configurations
 
+None.
+
+##### Optional Configurations
+
+You can assign pods to a given node. For more information, see [Assigning Pods to Nodes](https://kubernetes.io/docs/concepts/configuration/assign-pod-node/).
+
+Before using the `nodeSelector` option, make sure that the nodes are already labelled; then use those labels in the `nodeSelector` definition.
+
+Command:  
 ```
-$ ./create-domain.sh \
-  -i create-domain-inputs.yaml \
-  -o /<path to output-directory>
+kubectl label node <node-name>  <label-with-value>
 ```
 
-The script will perform the following steps:
+Example:
+```
+kubectl label node TestNode name=Test-Node
+```
 
-* Create a directory for the generated Kubernetes YAML files for this domain if it does not
-  already exist.  The path name is `/<path to output-directory>/weblogic-domains/<domainUID>`.
-  If the directory already exists, its contents must be removed before using this script.
-* Create a Kubernetes job that will start up a utility SOA Suite container and run
-  offline WLST scripts to create the domain on the shared storage.
-* Run and wait for the job to finish.
-* Create a Kubernetes domain YAML file, `domain.yaml`, in the "output" directory that was created above.
-  This YAML file can be used to create the Kubernetes resource using the `kubectl create -f`
-  or `kubectl apply -f` command:
+Then you can edit the `domain.yaml`  file to add the `nodeSelector` to the `serverPod` definition, as shown below.
 
-    ```
-    $ kubectl apply -f /<path to output-directory>/weblogic-domains/<domainUID>/domain.yaml
-    ```
+##### nodeSelector for assigning pods:
 
-* Create a convenient utility script, `delete-domain-job.yaml`, to clean up the domain home
-  created by the create script.
-
+```bash
+managedServers:
+ - serverName: soa_server1
+   serverPod:
+     nodeSelector:
+       name: Test-Node
+ - serverName: soa_server2
+   serverPod:
+     nodeSelector:
+       name: Test-Node
+```
 
 
-The default domain created by the script has the following characteristics:
-
-* An Administration Server named `AdminServer` listening on port `7001`.
-* A configured cluster named `soa_cluster-1` of size 5.
-* Two Managed Servers, named `soa_server1` and `soa_server2`, listening on port `8001`.
-* Log files that are located in `/shared/logs/<domainUID>`.
-* SOA Infra, SOA composer and WorklistApp applications deployed.
-* No data sources or JMS resources.
-* A T3 channel.
 
 #### Verify the results
 
-The create domain script will verify that the domain was created, and will report failure if there was any error.
+The create script will verify that the domain was created, and will report failure if there was any error.
 However, it may be desirable to manually verify the domain, even if just to gain familiarity with the
 various Kubernetes objects that were created by the script.
 
@@ -188,12 +231,13 @@ The content of the generated `domain.yaml`:
 
 ```
 $ cat output/weblogic-domains/soainfra/domain.yaml
-# Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates. All rights reserved.
-# Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
+# Copyright 2017, 2019, Oracle Corporation and/or its affiliates. All rights reserved.
+
+# Licensed under the Universal Permissive License v 1.0 as shown at http://oss.oracle.com/licenses/upl.
 #
 # This is an example of how to define a Domain resource.
 #
-apiVersion: "weblogic.oracle/v6"
+apiVersion: "weblogic.oracle/v4"
 kind: Domain
 metadata:
   name: soainfra
@@ -204,93 +248,68 @@ metadata:
 spec:
   # The WebLogic Domain Home
   domainHome: /u01/oracle/user_projects/domains/soainfra
-
   # If the domain home is in the image
   domainHomeInImage: false
-
   # The WebLogic Server Docker image that the Operator uses to start the domain
   image: "container-registry.oracle.com/middleware/soasuite:12.2.1.3"
-
   # imagePullPolicy defaults to "Always" if image version is :latest
   imagePullPolicy: "IfNotPresent"
-
   # Identify which Secret contains the credentials for pulling an image
   #imagePullSecrets:
   #- name:
-
   # Identify which Secret contains the WebLogic Admin credentials (note that there is an example of
   # how to create that Secret at the end of this file)
   webLogicCredentialsSecret:
     name: soainfra-domain-credentials
-
   # Whether to include the server out file into the pod's stdout, default is true
   includeServerOutInPodLog: true
-
   # Whether to enable log home
   logHomeEnabled: true
-
   # The in-pod location for domain log, server logs, server out, and Node Manager log files
   logHome: /u01/oracle/user_projects/domains/logs/soainfra
-  # An (optional) in-pod location for data storage of default and custom file stores.
-  # If not specified or the value is either not set or empty (e.g. dataHome: "") then the
-  # data storage directories are determined from the WebLogic domain home configuration.
-  dataHome: ""
-
   # serverStartPolicy legal values are "NEVER", "IF_NEEDED", or "ADMIN_ONLY"
   # This determines which WebLogic Servers the Operator will start up when it discovers this Domain
   # - "NEVER" will not start any server in the domain
   # - "ADMIN_ONLY" will start up only the administration server (no managed servers will be started)
   # - "IF_NEEDED" will start all non-clustered servers, including the administration server and clustered servers up to the replica count
   serverStartPolicy: "IF_NEEDED"
-
-  serverService:
-    precreateService: true
-
-  serverPod:  
+  serverPod:
     # an (optional) list of environment variable to be set on the servers
     env:
     - name: JAVA_OPTIONS
       value: "-Dweblogic.StdoutDebugEnabled=false"
     - name: USER_MEM_ARGS
-      value: "-Djava.security.egd=file:/dev/./urandom "
+      value: "-XX:+UseContainerSupport -Djava.security.egd=file:/dev/./urandom "
     volumes:
     - name: weblogic-domain-storage-volume
       persistentVolumeClaim:
         claimName: soainfra-domain-pvc
     volumeMounts:
-    - mountPath: /u01/oracle/user_projects
+    - mountPath: /u01/oracle/user_projects/domains
       name: weblogic-domain-storage-volume
-
+    serverService:
+      precreateService: true
   # adminServer is used to configure the desired behavior for starting the administration server.
   adminServer:
     # serverStartState legal values are "RUNNING" or "ADMIN"
     # "RUNNING" means the listed server will be started up to "RUNNING" mode
     # "ADMIN" means the listed server will be start up to "ADMIN" mode
     serverStartState: "RUNNING"
-    # adminService:
-    #   channels:
+    adminService:
+      channels:
     # The Admin Server's NodePort
     #    - channelName: default
     #      nodePort: 30701
     # Uncomment to export the T3Channel as a service
-    #    - channelName: T3Channel
-
+       - channelName: T3Channel
   # clusters is used to configure the desired behavior for starting member servers of a cluster.
   # If you use this entry, then the rules will be applied to ALL servers that are members of the named clusters.
   clusters:
-  - clusterName: osb_cluster
-    serverService:
-      precreateService: true
-    serverStartState: "RUNNING"
-    replicas: 2
-  # The number of managed servers to start for unlisted clusters
-  # replicas: 1
-
   - clusterName: soa_cluster
-    serverService:
-      precreateService: true
     serverStartState: "RUNNING"
     replicas: 2
+    serverService:
+      precreateService: true
   # The number of managed servers to start for unlisted clusters
   # replicas: 1
 ```
@@ -313,20 +332,22 @@ Name:         soainfra
 Namespace:    soans
 Labels:       weblogic.domainUID=soainfra
               weblogic.resourceVersion=domain-v2
-Annotations:  <none>
-API Version:  weblogic.oracle/v6
+Annotations:  kubectl.kubernetes.io/last-applied-configuration={"apiVersion":"weblogic.oracle/v4","kind":"Domain","metadata":{"annotations":{},"labels":{"weblogic.domainUID":"soainfra","weblogic.resourceVersion":"d...
+API Version:  weblogic.oracle/v4
 Kind:         Domain
 Metadata:
-  Creation Timestamp:  2020-01-27T10:04:11Z
-  Generation:          6
-  Resource Version:    18537800
-  Self Link:           /apis/weblogic.oracle/v6/namespaces/soans/domains/soainfra
-  UID:                 5dcb76e4-40ec-11ea-b332-020017041cc2
+  Cluster Name:
+  Creation Timestamp:  2019-07-04T14:12:16Z
+  Generation:          0
+  Resource Version:    21069865
+  Self Link:           /apis/weblogic.oracle/v4/namespaces/soans/domains/soainfra
+  UID:                 ba6ed779-9e65-11e9-b5ed-fa163efa261a
 Spec:
   Admin Server:
     Admin Service:
       Annotations:
       Channels:
+        Channel Name:  T3Channel
       Labels:
     Server Pod:
       Annotations:
@@ -338,13 +359,11 @@ Spec:
       Liveness Probe:
       Node Selector:
       Pod Security Context:
-      Readiness Gates:
       Readiness Probe:
       Resources:
         Limits:
         Requests:
       Shutdown:
-      Tolerations:
       Volume Mounts:
       Volumes:
     Server Service:
@@ -352,7 +371,7 @@ Spec:
       Labels:
     Server Start State:  RUNNING
   Clusters:
-    Cluster Name:  osb_cluster
+    Cluster Name:  soa_cluster
     Cluster Service:
       Annotations:
       Labels:
@@ -367,42 +386,11 @@ Spec:
       Liveness Probe:
       Node Selector:
       Pod Security Context:
-      Readiness Gates:
       Readiness Probe:
       Resources:
         Limits:
         Requests:
       Shutdown:
-      Tolerations:
-      Volume Mounts:
-      Volumes:
-    Server Service:
-      Annotations:
-      Labels:
-      Precreate Service:  true
-    Server Start State:   RUNNING
-    Cluster Name:         soa_cluster
-    Cluster Service:
-      Annotations:
-      Labels:
-    Replicas:  2
-    Server Pod:
-      Annotations:
-      Container Security Context:
-      Containers:
-      Env:
-      Init Containers:
-      Labels:
-      Liveness Probe:
-      Node Selector:
-      Pod Security Context:
-      Readiness Gates:
-      Readiness Probe:
-      Resources:
-        Limits:
-        Requests:
-      Shutdown:
-      Tolerations:
       Volume Mounts:
       Volumes:
     Server Service:
@@ -410,7 +398,6 @@ Spec:
       Labels:
       Precreate Service:          true
     Server Start State:           RUNNING
-  Data Home:
   Domain Home:                    /u01/oracle/user_projects/domains/soainfra
   Domain Home In Image:           false
   Image:                          container-registry.oracle.com/middleware/soasuite:12.2.1.3
@@ -427,21 +414,19 @@ Spec:
       Name:   JAVA_OPTIONS
       Value:  -Dweblogic.StdoutDebugEnabled=false
       Name:   USER_MEM_ARGS
-      Value:  -Djava.security.egd=file:/dev/./urandom
+      Value:  -XX:+UseContainerSupport -Djava.security.egd=file:/dev/./urandom
     Init Containers:
     Labels:
     Liveness Probe:
     Node Selector:
     Pod Security Context:
-    Readiness Gates:
     Readiness Probe:
     Resources:
       Limits:
       Requests:
     Shutdown:
-    Tolerations:
     Volume Mounts:
-      Mount Path:  /u01/oracle/user_projects
+      Mount Path:  /u01/oracle/user_projects/domains
       Name:        weblogic-domain-storage-volume
     Volumes:
       Name:  weblogic-domain-storage-volume
@@ -454,21 +439,32 @@ Spec:
   Web Logic Credentials Secret:
     Name:  soainfra-domain-credentials
 Status:
-  Clusters:
-    Cluster Name:      soa_cluster
-    Maximum Replicas:  5
-    Cluster Name:      osb_cluster
-    Maximum Replicas:  5
   Conditions:
+  Modified:  true
+  Replicas:  2
   Servers:
+    Cluster Name:  soa_cluster
+    Node Name:     TESTNODE
+    Server Name:   soa_server2
+    State:         UNKNOWN
+    Cluster Name:  soa_cluster
+    Node Name:     TESTNODE
+    Server Name:   soa_server1
+    State:         UNKNOWN
+    Server Name:   soa_server4
+    State:         SHUTDOWN
+    Server Name:   soa_server3
+    State:         SHUTDOWN
     Health:
-      Activation Time:  2020-01-27T10:08:18.876Z
+      Activation Time:  2019-07-04T14:16:34.780Z
       Overall Health:   ok
       Subsystems:
-    Node Name:    MyNode
+    Node Name:    TESTNODE
     Server Name:  AdminServer
     State:        RUNNING
-  Start Time:     2020-01-27T10:04:11.853Z
+    Server Name:  soa_server5
+    State:        SHUTDOWN
+  Start Time:     2019-07-04T14:12:16.871Z
 Events:           <none>
 ```
 
@@ -486,16 +482,14 @@ Use the following command to see the pods running the servers:
 $ kubectl get pods -n NAMESPACE
 ```
 
-Here is an example of the output of this command. You can verify that an Administration Server and two Managed Servers for each cluster (SOA and OSB) are running for `soaessosb` domain type.
+Here is an example of the output of this command:
 
 ```
 $ kubectl get pods -n soans
-NAME                                                READY   STATUS      RESTARTS   AGE
-soainfra-adminserver                                1/1     Running     0          20h
-soainfra-osb-server1                                1/1     Running     0          20h
-soainfra-osb-server2                                1/1     Running     0          20h
-soainfra-soa-server1                                1/1     Running     0          20h
-soainfra-soa-server2                                1/1     Running     0          20h
+NAME                   READY     STATUS    RESTARTS   AGE
+soainfra-adminserver   1/1       Running   0          1h
+soainfra-soa-server1   1/1       Running   0          1h
+soainfra-soa-server2   1/1       Running   0          1h
 ```
 
 #### Verify the services
@@ -506,24 +500,18 @@ Use the following command to see the services for the domain:
 $ kubectl get services -n NAMESPACE
 ```
 
-Here is an example of the output of this command. You can verify that services for Administration Server and Managed Servers (for SOA and OSB clusters) are created for `soaessosb` domain type.
-
+Here is an example of the output of this command:
 ```
 $ kubectl get services -n soans
-NAME                            TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                       AGE
-soainfra-adminserver            ClusterIP      None             <none>        7001/TCP                      20h
-soainfra-cluster-osb-cluster    ClusterIP      10.110.6.107     <none>        9001/TCP                      20h
-soainfra-cluster-soa-cluster    ClusterIP      10.100.165.105   <none>        8001/TCP                      20h
-soainfra-osb-server1            ClusterIP      None             <none>        9001/TCP                      20h
-soainfra-osb-server2            ClusterIP      None             <none>        9001/TCP                      20h
-soainfra-osb-server3            ClusterIP      10.99.1.111      <none>        9001/TCP                      20h
-soainfra-osb-server4            ClusterIP      10.106.178.175   <none>        9001/TCP                      20h
-soainfra-osb-server5            ClusterIP      10.97.65.163     <none>        9001/TCP                      20h
-soainfra-soa-server1            ClusterIP      None             <none>        8001/TCP                      20h
-soainfra-soa-server2            ClusterIP      None             <none>        8001/TCP                      20h
-soainfra-soa-server3            ClusterIP      10.104.189.192   <none>        8001/TCP                      20h
-soainfra-soa-server4            ClusterIP      10.100.168.31    <none>        8001/TCP                      20h
-soainfra-soa-server5            ClusterIP      10.101.171.78    <none>        8001/TCP                      20h
+NAME                            TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)              AGE
+soainfra-adminserver            ClusterIP   None             <none>        30012/TCP,7001/TCP   1h
+soainfra-adminserver-external   NodePort    10.99.147.149    <none>        30012:30012/TCP      1h
+soainfra-cluster-soa-cluster    ClusterIP   10.103.205.66    <none>        8001/TCP             1h
+soainfra-soa-server1            ClusterIP   None             <none>        8001/TCP             1h
+soainfra-soa-server2            ClusterIP   None             <none>        8001/TCP             1h
+soainfra-soa-server3            ClusterIP   10.109.227.78    <none>        8001/TCP             1h
+soainfra-soa-server4            ClusterIP   10.101.147.207   <none>        8001/TCP             1h
+soainfra-soa-server5            ClusterIP   10.105.14.5      <none>        8001/TCP             1h
 ```
 
 #### Delete the generated domain home

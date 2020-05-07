@@ -1,12 +1,12 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
 
-import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class Secret {
-
+  protected static final Logger logger = Logger.getLogger("OperatorIT", "OperatorIT");
   protected String secretName;
   protected String namespace;
   protected String username;
@@ -16,14 +16,6 @@ public class Secret {
     secretName = "";
   }
 
-  /**
-   * Construct secret.
-   * @param namespace namespace
-   * @param secretName name
-   * @param username username
-   * @param password password
-   * @throws Exception on failure
-   */
   public Secret(String namespace, String secretName, String username, String password)
       throws Exception {
     this.namespace = namespace;
@@ -32,7 +24,7 @@ public class Secret {
     this.password = password;
 
     String command = "kubectl -n " + namespace + " delete secret " + secretName;
-    LoggerHelper.getLocal().log(Level.INFO, "Running " + command);
+    logger.info("Running " + command);
     ExecCommand.exec(command);
     command =
         "kubectl -n "
@@ -44,7 +36,7 @@ public class Secret {
             + this.username
             + " --from-literal=password="
             + this.password;
-    LoggerHelper.getLocal().log(Level.INFO, "Running " + command);
+    logger.info("Running " + command);
     ExecResult result = ExecCommand.exec(command);
     if (result.exitValue() != 0) {
       throw new RuntimeException(
@@ -55,7 +47,7 @@ public class Secret {
               + "\n"
               + result.stderr());
     }
-    LoggerHelper.getLocal().log(Level.INFO, "command result " + result.stdout().trim());
+    logger.info("command result " + result.stdout().trim());
   }
 
   public String getSecretName() {
@@ -73,5 +65,4 @@ public class Secret {
   public String getPassword() {
     return password;
   }
-
 }

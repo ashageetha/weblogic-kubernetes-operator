@@ -1,4 +1,4 @@
-// Copyright (c) 2019, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.weblogic.domain.model;
@@ -7,8 +7,8 @@ package oracle.kubernetes.weblogic.domain.model;
  * Describes a problem with a domain resource.
  */
 public class DomainValidationFailure {
-  private final String reason;
-  private final String message;
+  private String reason;
+  private String message;
 
   DomainValidationFailure(String reason, String message) {
     this.reason = reason;

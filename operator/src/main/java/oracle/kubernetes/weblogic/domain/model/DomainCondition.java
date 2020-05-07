@@ -1,4 +1,4 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.weblogic.domain.model;
@@ -14,10 +14,8 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.joda.time.DateTime;
 
-import static oracle.kubernetes.weblogic.domain.model.ObjectPatch.createObjectPatch;
-
 /** DomainCondition contains details for the current condition of this domain. */
-public class DomainCondition implements Comparable<DomainCondition>, PatchableComponent<DomainCondition> {
+public class DomainCondition implements Comparable<DomainCondition> {
 
   @Description(
       "The type of the condition. Valid types are Progressing, "
@@ -54,31 +52,6 @@ public class DomainCondition implements Comparable<DomainCondition>, PatchableCo
   public DomainCondition(DomainConditionType conditionType) {
     lastTransitionTime = SystemClock.now();
     type = conditionType;
-  }
-
-  DomainCondition(DomainCondition other) {
-    this.type = other.type;
-    this.lastProbeTime = other.lastProbeTime;
-    this.lastTransitionTime = other.lastTransitionTime;
-    this.message = other.message;
-    this.reason = other.reason;
-    this.status = other.status;
-  }
-
-  /**
-   * Returns the reason to set on the domain status when this condition is added.
-   * @return a reason or null
-   */
-  String getStatusReason() {
-    return getType().getStatusReason(this);
-  }
-
-  /**
-   * Returns the message to set on the domain status when this condition is added.
-   * @return a message or null
-   */
-  String getStatusMessage() {
-    return getType().getStatusMessage(this);
   }
 
   /**
@@ -197,11 +170,6 @@ public class DomainCondition implements Comparable<DomainCondition>, PatchableCo
   }
 
   @Override
-  public boolean isPatchableFrom(DomainCondition other) {
-    return false; // domain conditions are never patched
-  }
-
-  @Override
   public String toString() {
     return new ToStringBuilder(this)
         .append("lastProbeTime", lastProbeTime)
@@ -244,15 +212,4 @@ public class DomainCondition implements Comparable<DomainCondition>, PatchableCo
   public int compareTo(DomainCondition o) {
     return type.compareTo(o.type);
   }
-
-  private static final ObjectPatch<DomainCondition> conditionPatch = createObjectPatch(DomainCondition.class)
-        .withStringField("message", DomainCondition::getMessage)
-        .withStringField("reason", DomainCondition::getReason)
-        .withStringField("status", DomainCondition::getStatus)
-        .withEnumField("type", DomainCondition::getType);
-
-  static ObjectPatch<DomainCondition> getObjectPatch() {
-    return conditionPatch;
-  }
-
 }

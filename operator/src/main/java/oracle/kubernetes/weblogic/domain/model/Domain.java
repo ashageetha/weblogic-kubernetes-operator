@@ -1,4 +1,4 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.weblogic.domain.model;
@@ -19,15 +19,13 @@ import javax.validation.Valid;
 
 import com.google.gson.annotations.Expose;
 import com.google.gson.annotations.SerializedName;
-import io.kubernetes.client.openapi.models.V1EnvVar;
-import io.kubernetes.client.openapi.models.V1LocalObjectReference;
-import io.kubernetes.client.openapi.models.V1ObjectMeta;
-import io.kubernetes.client.openapi.models.V1SecretReference;
-import io.kubernetes.client.openapi.models.V1VolumeMount;
+import io.kubernetes.client.models.V1EnvVar;
+import io.kubernetes.client.models.V1ObjectMeta;
+import io.kubernetes.client.models.V1SecretReference;
+import io.kubernetes.client.models.V1VolumeMount;
 import oracle.kubernetes.json.Description;
 import oracle.kubernetes.operator.LabelConstants;
 import oracle.kubernetes.operator.VersionConstants;
-import oracle.kubernetes.operator.helpers.SecretType;
 import oracle.kubernetes.weblogic.domain.EffectiveConfigurationFactory;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
@@ -212,10 +210,6 @@ public class Domain {
     return this;
   }
 
-  public String getNamespace() {
-    return metadata.getNamespace();
-  }
-
   public AdminServerSpec getAdminServerSpec() {
     return getEffectiveConfigurationFactory().getAdminServerSpec();
   }
@@ -337,12 +331,25 @@ public class Domain {
   }
 
   /**
-   * Name of the secret containing WebLogic startup credentials username and password.
+   * DomainStatus represents information about the status of a domain. Status may trail the actual
+   * state of a system.
    *
-   * @return the secret name
+   * @return Status
    */
-  public String getWebLogicCredentialsSecretName() {
-    return spec.getWebLogicCredentialsSecret().getName();
+  public DomainStatus getOrCreateStatus() {
+    if (status == null) {
+      status = new DomainStatus();
+    }
+    return status;
+  }
+
+  /**
+   * Reference to secret containing WebLogic startup credentials username and password.
+   *
+   * @return credentials secret
+   */
+  public V1SecretReference getWebLogicCredentialsSecret() {
+    return spec.getWebLogicCredentialsSecret();
   }
 
   /**
@@ -480,22 +487,20 @@ public class Domain {
         .isEquals();
   }
 
-  public List<String> getValidationFailures(KubernetesResourceLookup kubernetesResources) {
-    return new Validator().getValidationFailures(kubernetesResources);
+  public List<String> getValidationFailures() {
+    return new Validator().getValidationFailures();
   }
 
   class Validator {
-    private final List<String> failures = new ArrayList<>();
-    private final Set<String> clusterNames = new HashSet<>();
-    private final Set<String> serverNames = new HashSet<>();
+    private List<String> failures = new ArrayList<>();
+    private Set<String> clusterNames = new HashSet<>();
+    private Set<String> serverNames = new HashSet<>();
 
-    List<String> getValidationFailures(KubernetesResourceLookup kubernetesResources) {
+    List<String> getValidationFailures() {
       addDuplicateNames();
       addInvalidMountPaths();
       addUnmappedLogHome();
       addReservedEnvironmentVariables();
-      addMissingSecrets(kubernetesResources);
-      verifyNoAlternateSecretNamespaceSpecified();
 
       return failures;
     }
@@ -524,19 +529,17 @@ public class Domain {
     }
 
     private void checkDuplicateServerName(String serverName) {
-      if (serverNames.contains(serverName)) {
+      if (serverNames.contains(serverName))
         failures.add(DomainValidationMessages.duplicateServerName(serverName));
-      } else {
+      else
         serverNames.add(serverName);
-      }
     }
 
     private void checkDuplicateClusterName(String clusterName) {
-      if (clusterNames.contains(clusterName)) {
+      if (clusterNames.contains(clusterName))
         failures.add(DomainValidationMessages.duplicateClusterName(clusterName));
-      } else {
+      else
         clusterNames.add(clusterName);
-      }
     }
 
     private void addInvalidMountPaths() {
@@ -544,21 +547,15 @@ public class Domain {
     }
 
     private void checkValidMountPath(V1VolumeMount mount) {
-      if (!new File(mount.getMountPath()).isAbsolute()) {
+      if (!new File(mount.getMountPath()).isAbsolute())
         failures.add(DomainValidationMessages.badVolumeMountPath(mount));
-      }
     }
 
     private void addUnmappedLogHome() {
-      if (!isLogHomeEnabled()) {
-        return;
-      }
+      if (!isLogHomeEnabled()) return;
 
-      if (getSpec().getAdditionalVolumeMounts().stream()
-          .map(V1VolumeMount::getMountPath)
-          .noneMatch(this::mapsLogHome)) {
+      if (getSpec().getAdditionalVolumeMounts().stream().map(V1VolumeMount::getMountPath).noneMatch(this::mapsLogHome))
         failures.add(DomainValidationMessages.logHomeNotMounted(getLogHome()));
-      }
     }
 
     private boolean mapsLogHome(String mountPath) {
@@ -566,18 +563,15 @@ public class Domain {
     }
 
     private String separatorTerminated(String path) {
-      if (path.endsWith(File.separator)) {
-        return path;
-      } else {
-        return path + File.separator;
-      }
+      if (path.endsWith(File.separator)) return path;
+      else return path + File.separator;
     }
 
     private void addReservedEnvironmentVariables() {
       checkReservedIntrospectorVariables(spec, "spec");
       Optional.ofNullable(spec.getAdminServer())
           .ifPresent(a -> checkReservedIntrospectorVariables(a, "spec.adminServer"));
-
+      
       spec.getManagedServers()
           .forEach(s -> checkReservedEnvironmentVariables(s, "spec.managedServers[" + s.getServerName() + "]"));
       spec.getClusters()
@@ -585,16 +579,14 @@ public class Domain {
     }
 
     class EnvironmentVariableCheck {
-      private final Predicate<String> isReserved;
+      private Predicate<String> isReserved;
 
       EnvironmentVariableCheck(Predicate<String> isReserved) {
         this.isReserved = isReserved;
       }
 
       void checkEnvironmentVariables(@Nonnull BaseConfiguration configuration, String prefix) {
-        if (configuration.getEnv() == null) {
-          return;
-        }
+        if (configuration.getEnv() == null) return;
 
         List<String> reservedNames = configuration.getEnv()
             .stream()
@@ -602,9 +594,8 @@ public class Domain {
             .filter(isReserved)
             .collect(Collectors.toList());
 
-        if (!reservedNames.isEmpty()) {
+        if (!reservedNames.isEmpty())
           failures.add(DomainValidationMessages.reservedVariableNames(prefix, reservedNames));
-        }
       }
     }
 
@@ -615,43 +606,6 @@ public class Domain {
     @SuppressWarnings("SameParameterValue")
     private void checkReservedIntrospectorVariables(BaseConfiguration configuration, String prefix) {
       new EnvironmentVariableCheck(IntrospectorJobEnvVars::isReserved).checkEnvironmentVariables(configuration, prefix);
-    }
-
-    private void addMissingSecrets(KubernetesResourceLookup resourceLookup) {
-      verifySecretExists(resourceLookup, getWebLogicCredentialsSecretName(), SecretType.WebLogicCredentials);
-      for (V1LocalObjectReference reference : getImagePullSecrets()) {
-        verifySecretExists(resourceLookup, reference.getName(), SecretType.ImagePull);
-      }
-      for (String secretName : getConfigOverrideSecrets()) {
-        verifySecretExists(resourceLookup, secretName, SecretType.ConfigOverride);
-      }
-    }
-
-    private List<V1LocalObjectReference> getImagePullSecrets() {
-      return spec.getImagePullSecrets();
-    }
-
-    private List<String> getConfigOverrideSecrets() {
-      return spec.getConfigOverrideSecrets();
-    }
-
-    @SuppressWarnings("SameParameterValue")
-    private void verifySecretExists(KubernetesResourceLookup resources, String secretName, SecretType type) {
-      if (!resources.isSecretExists(secretName, getNamespace())) {
-        failures.add(DomainValidationMessages.noSuchSecret(secretName, getNamespace(), type));
-      }
-    }
-
-    private void verifyNoAlternateSecretNamespaceSpecified() {
-      if (!getSpecifiedWebLogicCredentialsNamespace().equals(getNamespace())) {
-        failures.add(DomainValidationMessages.illegalSecretNamespace(getSpecifiedWebLogicCredentialsNamespace()));
-      }
-    }
-
-    private String getSpecifiedWebLogicCredentialsNamespace() {
-      return Optional.ofNullable(spec.getWebLogicCredentialsSecret())
-          .map(V1SecretReference::getNamespace)
-          .orElse(getNamespace());
     }
 
   }

@@ -1,25 +1,25 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helpers;
 
 import java.io.File;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import io.kubernetes.client.openapi.models.V1ConfigMapVolumeSource;
-import io.kubernetes.client.openapi.models.V1Container;
-import io.kubernetes.client.openapi.models.V1Job;
-import io.kubernetes.client.openapi.models.V1JobSpec;
-import io.kubernetes.client.openapi.models.V1ObjectMeta;
-import io.kubernetes.client.openapi.models.V1PodSpec;
-import io.kubernetes.client.openapi.models.V1PodTemplateSpec;
-import io.kubernetes.client.openapi.models.V1SecretVolumeSource;
-import io.kubernetes.client.openapi.models.V1Volume;
-import io.kubernetes.client.openapi.models.V1VolumeMount;
-import oracle.kubernetes.operator.DomainStatusUpdater;
+import io.kubernetes.client.models.V1ConfigMapVolumeSource;
+import io.kubernetes.client.models.V1Container;
+import io.kubernetes.client.models.V1Job;
+import io.kubernetes.client.models.V1JobSpec;
+import io.kubernetes.client.models.V1ObjectMeta;
+import io.kubernetes.client.models.V1PodSpec;
+import io.kubernetes.client.models.V1PodTemplateSpec;
+import io.kubernetes.client.models.V1SecretVolumeSource;
+import io.kubernetes.client.models.V1Volume;
+import io.kubernetes.client.models.V1VolumeMount;
 import oracle.kubernetes.operator.KubernetesConstants;
 import oracle.kubernetes.operator.LabelConstants;
 import oracle.kubernetes.operator.ProcessingConstants;
@@ -98,7 +98,7 @@ public abstract class JobStepContext extends BasePodStepContext {
   }
 
   String getWebLogicCredentialsSecretName() {
-    return getDomain().getWebLogicCredentialsSecretName();
+    return getDomain().getWebLogicCredentialsSecret().getName();
   }
 
   // ----------------------- step methods ------------------------------
@@ -219,9 +219,7 @@ public abstract class JobStepContext extends BasePodStepContext {
           .putLabelsItem(LabelConstants.DOMAINUID_LABEL, getDomainUid())
           .putLabelsItem(
                 LabelConstants.JOBNAME_LABEL, LegalNames.toJobIntrospectorName(getDomainUid()));
-    if (isIstioEnabled()) {
-      metadata.putAnnotationsItem("sidecar.istio.io/inject", "false");
-    }
+    if (isIstioEnabled()) metadata.putAnnotationsItem("sidecar.istio.io/inject", "false");
     return metadata;
   }
 
@@ -323,15 +321,14 @@ public abstract class JobStepContext extends BasePodStepContext {
 
     @Override
     public NextAction onFailure(Packet packet, CallResponse<V1Job> callResponse) {
-      if (UnrecoverableErrorBuilder.isAsyncCallFailure(callResponse)) {
+      if (UnrecoverableErrorBuilder.isAsyncCallFailure(callResponse))
         return updateDomainStatus(packet, callResponse);
-      } else {
+      else
         return super.onFailure(packet, callResponse);
-      }
     }
 
     private NextAction updateDomainStatus(Packet packet, CallResponse<V1Job> callResponse) {
-      return doNext(DomainStatusUpdater.createFailedStep(callResponse, null), packet);
+      return doNext(DomainStatusPatch.createStep(getDomain(), callResponse.getE()), packet);
     }
 
     @Override

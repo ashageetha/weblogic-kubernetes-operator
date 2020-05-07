@@ -1,4 +1,4 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.weblogic.domain.model;
@@ -6,14 +6,13 @@ package oracle.kubernetes.weblogic.domain.model;
 import java.util.Arrays;
 import javax.annotation.Nonnull;
 
-import io.kubernetes.client.openapi.models.V1Affinity;
-import io.kubernetes.client.openapi.models.V1Container;
-import io.kubernetes.client.openapi.models.V1EnvVar;
-import io.kubernetes.client.openapi.models.V1PodReadinessGate;
-import io.kubernetes.client.openapi.models.V1PodSecurityContext;
-import io.kubernetes.client.openapi.models.V1SecretReference;
-import io.kubernetes.client.openapi.models.V1SecurityContext;
-import io.kubernetes.client.openapi.models.V1Toleration;
+import io.kubernetes.client.models.V1Affinity;
+import io.kubernetes.client.models.V1Container;
+import io.kubernetes.client.models.V1EnvVar;
+import io.kubernetes.client.models.V1PodReadinessGate;
+import io.kubernetes.client.models.V1PodSecurityContext;
+import io.kubernetes.client.models.V1SecurityContext;
+import io.kubernetes.client.models.V1Toleration;
 import oracle.kubernetes.operator.KubernetesConstants;
 import oracle.kubernetes.weblogic.domain.AdminServerConfigurator;
 import oracle.kubernetes.weblogic.domain.ClusterConfigurator;
@@ -94,8 +93,8 @@ public class DomainCommonConfigurator extends DomainConfigurator {
   }
 
   @Override
-  public DomainConfigurator withAdditionalPvClaimVolume(String name, String claimName) {
-    getDomainSpec().addAdditionalPvClaimVolume(name, claimName);
+  public DomainConfigurator withAdditionalPVClaimVolume(String name, String claimName) {
+    getDomainSpec().addAdditionalPVClaimVolume(name, claimName);
     return this;
   }
 
@@ -210,12 +209,6 @@ public class DomainCommonConfigurator extends DomainConfigurator {
   }
 
   @Override
-  public DomainConfigurator withWebLogicCredentialsSecret(String secretName, String namespace) {
-    getDomainSpec().setWebLogicCredentialsSecret(new V1SecretReference().name(secretName).namespace(namespace));
-    return this;
-  }
-
-  @Override
   public ClusterConfigurator configureCluster(@Nonnull String clusterName) {
     return new ClusterConfiguratorImpl(getOrCreateCluster(clusterName));
   }
@@ -291,7 +284,7 @@ public class DomainCommonConfigurator extends DomainConfigurator {
 
   class AdminServerConfiguratorImpl extends ServerConfiguratorImpl
       implements AdminServerConfigurator {
-    private final AdminServer adminServer;
+    private AdminServer adminServer;
 
     AdminServerConfiguratorImpl(AdminServer adminServer) {
       super(adminServer);
@@ -300,12 +293,12 @@ public class DomainCommonConfigurator extends DomainConfigurator {
 
     @Override
     public AdminService configureAdminService() {
-      return adminServer.createAdminService();
+      return adminServer.getAdminService();
     }
   }
 
   class ServerConfiguratorImpl implements ServerConfigurator {
-    private final Server server;
+    private Server server;
 
     ServerConfiguratorImpl(Server server) {
       this.server = server;
@@ -483,7 +476,7 @@ public class DomainCommonConfigurator extends DomainConfigurator {
   }
 
   class ClusterConfiguratorImpl implements ClusterConfigurator {
-    private final Cluster cluster;
+    private Cluster cluster;
 
     ClusterConfiguratorImpl(Cluster cluster) {
       this.cluster = cluster;

@@ -1,4 +1,4 @@
-// Copyright (c) 2019, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.rest;
@@ -71,14 +71,9 @@ public class RestTest extends JerseyTest {
     mementos.add(TestUtils.silenceJsonPathLogger());
   }
 
-  /**
-   * restore mementos.
-   */
   @After
   public void restore() {
-    for (Memento memento : mementos) {
-      memento.revert();
-    }
+    for (Memento memento : mementos) memento.revert();
   }
 
   @Override
@@ -135,12 +130,8 @@ public class RestTest extends JerseyTest {
 
   private Invocation.Builder createRequest(String href) {
     Invocation.Builder request = target(href).request();
-    if (authorizationHeader != null) {
-      request.header(HttpHeaders.AUTHORIZATION, authorizationHeader);
-    }
-    if (includeRequestedByHeader) {
-      request.header("X-Requested-By", "TestClient");
-    }
+    if (authorizationHeader != null) request.header(HttpHeaders.AUTHORIZATION, authorizationHeader);
+    if (includeRequestedByHeader) request.header("X-Requested-By", "TestClient");
     return request;
   }
 
@@ -348,11 +339,8 @@ public class RestTest extends JerseyTest {
     @Override
     protected boolean matchesSafely(List<Object> item, Description mismatchDescription) {
       Set<Object> actuals = new HashSet<>(item);
-      for (Object o : expectedContents) {
-        if (!actuals.remove(o)) {
-          return reportMismatch(item, mismatchDescription);
-        }
-      }
+      for (Object o : expectedContents)
+        if (!actuals.remove(o)) return reportMismatch(item, mismatchDescription);
       return true;
     }
 

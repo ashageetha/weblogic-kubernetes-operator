@@ -1,24 +1,23 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.create;
 
 import io.kubernetes.client.custom.Quantity;
-import io.kubernetes.client.openapi.models.ExtensionsV1beta1Deployment;
-import io.kubernetes.client.openapi.models.V1ClusterRole;
-import io.kubernetes.client.openapi.models.V1ClusterRoleBinding;
-import io.kubernetes.client.openapi.models.V1ConfigMap;
-import io.kubernetes.client.openapi.models.V1Container;
-import io.kubernetes.client.openapi.models.V1LabelSelector;
-import io.kubernetes.client.openapi.models.V1Namespace;
-import io.kubernetes.client.openapi.models.V1Probe;
-import io.kubernetes.client.openapi.models.V1ResourceRequirements;
-import io.kubernetes.client.openapi.models.V1Role;
-import io.kubernetes.client.openapi.models.V1RoleBinding;
-import io.kubernetes.client.openapi.models.V1Secret;
-import io.kubernetes.client.openapi.models.V1Service;
-import io.kubernetes.client.openapi.models.V1ServiceAccount;
-import io.kubernetes.client.openapi.models.V1ServiceSpec;
+import io.kubernetes.client.models.ExtensionsV1beta1Deployment;
+import io.kubernetes.client.models.V1ClusterRole;
+import io.kubernetes.client.models.V1ClusterRoleBinding;
+import io.kubernetes.client.models.V1ConfigMap;
+import io.kubernetes.client.models.V1Container;
+import io.kubernetes.client.models.V1Namespace;
+import io.kubernetes.client.models.V1Probe;
+import io.kubernetes.client.models.V1ResourceRequirements;
+import io.kubernetes.client.models.V1Role;
+import io.kubernetes.client.models.V1RoleBinding;
+import io.kubernetes.client.models.V1Secret;
+import io.kubernetes.client.models.V1Service;
+import io.kubernetes.client.models.V1ServiceAccount;
+import io.kubernetes.client.models.V1ServiceSpec;
 import oracle.kubernetes.operator.utils.GeneratedOperatorObjects;
 import oracle.kubernetes.operator.utils.KubernetesArtifactUtils;
 import oracle.kubernetes.operator.utils.OperatorValues;
@@ -107,7 +106,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                     .namespace(getInputs().getNamespace())
                     .putLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
                     .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
-            .putDataItem("dedicated", getInputs().getDedicated())
             .putDataItem("serviceaccount", getInputs().getServiceAccount())
             .putDataItem("targetNamespaces", getInputs().getTargetNamespaces());
     if (expectExternalCredentials()) {
@@ -178,9 +176,6 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                 .putLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
         .spec(
             newDeploymentSpec()
-                .selector(new V1LabelSelector()
-                    .putMatchLabelsItem(RESOURCE_VERSION_LABEL, OPERATOR_V2)
-                    .putMatchLabelsItem(OPERATORNAME_LABEL, getInputs().getNamespace()))
                 .replicas(1)
                 .template(
                     newPodTemplateSpec()
@@ -407,6 +402,20 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                 .verbs(asList("get", "list", "watch")))
         .addRulesItem(
             newPolicyRule()
+                .addApiGroupsItem("")
+                .resources(singletonList("persistentvolumes"))
+                .verbs(
+                    asList(
+                        "get",
+                        "list",
+                        "watch",
+                        "create",
+                        "update",
+                        "patch",
+                        "delete",
+                        "deletecollection")))
+        .addRulesItem(
+            newPolicyRule()
                 .addApiGroupsItem("apiextensions.k8s.io")
                 .addResourcesItem("customresourcedefinitions")
                 .verbs(
@@ -416,7 +425,9 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                         "watch",
                         "create",
                         "update",
-                        "patch")))
+                        "patch",
+                        "delete",
+                        "deletecollection")))
         .addRulesItem(
             newPolicyRule()
                 .addApiGroupsItem("weblogic.oracle")
@@ -425,13 +436,32 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                 .verbs(asList("get", "list", "watch", "update", "patch")))
         .addRulesItem(
             newPolicyRule()
+                .addApiGroupsItem("extensions")
+                .addResourcesItem("ingresses")
+                .verbs(
+                    asList(
+                        "get",
+                        "list",
+                        "watch",
+                        "create",
+                        "update",
+                        "patch",
+                        "delete",
+                        "deletecollection")))
+        .addRulesItem(
+            newPolicyRule()
                 .addApiGroupsItem("authentication.k8s.io")
                 .addResourcesItem("tokenreviews")
                 .verbs(singletonList("create")))
         .addRulesItem(
             newPolicyRule()
                 .addApiGroupsItem("authorization.k8s.io")
-                .resources(singletonList("selfsubjectrulesreviews"))
+                .resources(
+                    asList(
+                        "selfsubjectaccessreviews",
+                        "localsubjectaccessreviews",
+                        "subjectaccessreviews",
+                        "selfsubjectrulesreviews"))
                 .verbs(singletonList("create")));
   }
 
@@ -586,7 +616,9 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                         "services",
                         "configmaps",
                         "pods",
-                        "events"))
+                        "podtemplates",
+                        "events",
+                        "persistentvolumeclaims"))
                 .verbs(
                     asList(
                         "get",
@@ -615,7 +647,7 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
         .addRulesItem(
             newPolicyRule()
                 .addApiGroupsItem("batch")
-                .resources(singletonList("jobs"))
+                .resources(asList("jobs", "cronjobs"))
                 .verbs(
                     asList(
                         "get",
@@ -625,7 +657,40 @@ public abstract class CreateOperatorGeneratedFilesTestBase {
                         "update",
                         "patch",
                         "delete",
-                        "deletecollection")));
+                        "deletecollection")))
+        .addRulesItem(
+            newPolicyRule()
+                .addApiGroupsItem("settings.k8s.io")
+                .addResourcesItem("podpresets")
+                .verbs(
+                    asList(
+                        "get",
+                        "list",
+                        "watch",
+                        "create",
+                        "update",
+                        "patch",
+                        "delete",
+                        "deletecollection")))
+        .addRulesItem(
+            newPolicyRule()
+                .addApiGroupsItem("extensions")
+                .resources(asList("podsecuritypolicies", "networkpolicies"))
+                .verbs(
+                    asList(
+                        "get",
+                        "list",
+                        "watch",
+                        "create",
+                        "update",
+                        "patch",
+                        "delete",
+                        "deletecollection")))
+        .addRulesItem(
+            newPolicyRule()
+                .addApiGroupsItem("storage.k8s.io")
+                .addResourcesItem("storageclasses")
+                .verbs(asList("get", "list", "watch")));
   }
 
   @Test

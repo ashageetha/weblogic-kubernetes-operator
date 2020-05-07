@@ -1,4 +1,4 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.steps;
@@ -13,9 +13,9 @@ import java.util.logging.LogRecord;
 
 import com.meterware.simplestub.Memento;
 import com.meterware.simplestub.StaticStubSupport;
-import io.kubernetes.client.openapi.models.V1EnvVar;
-import io.kubernetes.client.openapi.models.V1ObjectMeta;
-import io.kubernetes.client.openapi.models.V1Pod;
+import io.kubernetes.client.models.V1EnvVar;
+import io.kubernetes.client.models.V1ObjectMeta;
+import io.kubernetes.client.models.V1Pod;
 import oracle.kubernetes.operator.LabelConstants;
 import oracle.kubernetes.operator.ProcessingConstants;
 import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
@@ -114,10 +114,6 @@ public class ManagedServersUpStepTest {
     return new DomainSpec().withDomainUid(UID).withReplicas(1);
   }
 
-  /**
-   * Setup env for tests.
-   * @throws NoSuchFieldException if TestStepFactory fails to install
-   */
   @Before
   public void setUp() throws NoSuchFieldException {
     mementos.add(consoleHandlerMemento = TestUtils.silenceOperatorLogger());
@@ -125,15 +121,9 @@ public class ManagedServersUpStepTest {
     testSupport.addDomainPresenceInfo(domainPresenceInfo);
   }
 
-  /**
-   * Cleanup env after tests.
-   * @throws Exception if test support failed
-   */
   @After
   public void tearDown() throws Exception {
-    for (Memento memento : mementos) {
-      memento.revert();
-    }
+    for (Memento memento : mementos) memento.revert();
 
     testSupport.throwOnCompletionFailure();
   }
@@ -655,9 +645,7 @@ public class ManagedServersUpStepTest {
 
     static ServerStartupInfo getServerStartupInfo(String serverName) {
       for (ServerStartupInfo startupInfo : info.getServerStartupInfo()) {
-        if (startupInfo.serverConfig.getName().equals(serverName)) {
-          return startupInfo;
-        }
+        if (startupInfo.serverConfig.getName().equals(serverName)) return startupInfo;
       }
 
       return null;

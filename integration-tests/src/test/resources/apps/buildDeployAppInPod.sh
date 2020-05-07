@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Copyright (c) 2019, 2020, Oracle Corporation and/or its affiliates.
+# Copyright (c) 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 # Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 usage()
@@ -48,8 +48,7 @@ echo -e "cp -r ${APP_INFO_DIR}/* stagedir/${APP_INFO_DIR}/\n"
 cp -r ${APP_INFO_DIR}/* stagedir/${APP_INFO_DIR}/
 
 echo -e "javac -d stagedir/${APP_INFO_DIR}/classes *.java\n"
-javac -d stagedir/${APP_INFO_DIR}/classes *.java | tee compile.out
-cat compile.out
+javac -d stagedir/${APP_INFO_DIR}/classes *.java
 
 echo -e "jar -cvf ${ARCHIVE_FILE_NAME} -C stagedir .\n"
 jar -cvf ${ARCHIVE_FILE_NAME} -C stagedir .

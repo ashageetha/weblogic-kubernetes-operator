@@ -1,4 +1,4 @@
-// Copyright (c) 2019, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator;
@@ -8,22 +8,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
 import java.util.Map;
-import java.util.logging.Level;
 
 import oracle.kubernetes.operator.utils.Domain;
-import oracle.kubernetes.operator.utils.LoggerHelper;
 import oracle.kubernetes.operator.utils.Operator;
 import oracle.kubernetes.operator.utils.TestUtils;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.MethodOrderer.Alphanumeric;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.AfterClass;
+import org.junit.Assume;
+import org.junit.BeforeClass;
+import org.junit.FixMethodOrder;
+import org.junit.Test;
+import org.junit.runners.MethodSorters;
 
 /**
  * Simple JUnit test file used for testing Operator.
@@ -31,78 +26,56 @@ import org.junit.jupiter.api.TestMethodOrder;
  * <p>This test is used for creating Operator(s) and domain(s) which are managed by the Operator(s).
  * And to test WLS server discovery feature.
  */
-@TestMethodOrder(Alphanumeric.class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 public class ItServerDiscovery extends BaseTest {
   private static String testDomainYamlFile;
 
   private static Operator operator;
   private static Domain domain;
-  private static String domainNS;
-  private static String testClassName;
-  private static StringBuffer namespaceList;
 
   /**
    * This method gets called only once before any of the test methods are executed. It does the
    * initialization of the integration test properties defined in OperatorIT.properties and setting
-   * the resultRoot, pvRoot and projectRoot attributes.
+   * the resultRoot, pvRoot and projectRoot attributes. It also creates Operator, domain and a test
+   * domain yaml file.
    *
    * @throws Exception exception
    */
-  @BeforeAll
+  @BeforeClass
   public static void staticPrepare() throws Exception {
     if (FULLTEST) {
-      namespaceList = new StringBuffer();
-      testClassName = new Object() {
-      }.getClass().getEnclosingClass().getSimpleName();
-      initialize(APP_PROPS_FILE, testClassName);
-    }
-  }
-
-  /**
-   * This method gets called before every test. It creates the result/pv root directories
-   * for the test. Creates the operator and domain if its not running.
-   *
-   * @throws Exception exception if result/pv/operator/domain creation fails
-   */
-  @BeforeEach
-  public void prepare() throws Exception {
-    if (FULLTEST) {
-      createResultAndPvDirs(testClassName);
-      String testClassNameShort = "itdiscovery";
-      // create operator1
+      // initialize test properties and create the directories
+      initialize(APP_PROPS_FILE);
+  
+      // Create operator1
       if (operator == null) {
-        Map<String, Object> operatorMap = createOperatorMap(getNewSuffixCount(), true, testClassNameShort);
-        operator = TestUtils.createOperator(operatorMap, Operator.RestCertType.SELF_SIGNED);
-        Assertions.assertNotNull(operator);
-        domainNS = ((ArrayList<String>) operatorMap.get("domainNamespaces")).get(0);
-        namespaceList.append((String)operatorMap.get("namespace"));
-        namespaceList.append(" ").append(domainNS);
+        logger.info("Creating Operator & waiting for the script to complete execution");
+        operator = TestUtils.createOperator(OPERATOR1_YAML);
       }
+  
       // create domain
       if (domain == null) {
-        LoggerHelper.getLocal().log(Level.INFO, "Creating WLS Domain & waiting for the script to complete execution");
-        Map<String, Object> domainMap = createDomainMap(getNewSuffixCount(), testClassNameShort);
-        domainMap.put("namespace", domainNS);
-        domain = TestUtils.createDomain(domainMap);
+        logger.info("Creating WLS Domain & waiting for the script to complete execution");
+        domain = TestUtils.createDomain(DOMAINONPV_WLST_YAML);
         domain.verifyDomainCreated();
       }
-
+  
       final String testYamlFileName = "custom-domaint.yaml";
-
+  
       String domainYaml =
-          getUserProjectsDir()
+          BaseTest.getUserProjectsDir()
               + "/weblogic-domains/"
               + domain.getDomainUid()
               + "/domain.yaml";
-
+  
       // create test domain yaml file
-      testDomainYamlFile = getResultDir() + "/" + testYamlFileName;
-
+      testDomainYamlFile = BaseTest.getResultDir() + "/" + testYamlFileName;
+  
       Path sourceFile = Paths.get(domainYaml);
       Path targetFile = Paths.get(testDomainYamlFile);
-
+  
       Files.copy(sourceFile, targetFile, StandardCopyOption.REPLACE_EXISTING);
-
+  
       String content = new String(Files.readAllBytes(targetFile), StandardCharsets.UTF_8);
       content = content.replaceAll("replicas: 2", "replicas: 3");
       Files.write(targetFile, content.getBytes(StandardCharsets.UTF_8));
@@ -114,14 +87,17 @@ public class ItServerDiscovery extends BaseTest {
    *
    * @throws Exception exception
    */
-  @AfterAll
+  @AfterClass
   public static void staticUnPrepare() throws Exception {
     if (FULLTEST) {
-      tearDown(new Object() {
-      }.getClass().getEnclosingClass().getSimpleName(), namespaceList.toString());
-
-      LoggerHelper.getLocal().log(Level.INFO, "SUCCESS");
-    }
+      logger.info("++++++++++++++++++++++++++++++++++");
+      logger.info("BEGIN");
+      logger.info("Run once, release cluster lease");
+  
+      tearDown(new Object() {}.getClass().getEnclosingClass().getSimpleName());
+  
+      logger.info("SUCCESS");
+    }    
   }
 
   /**
@@ -132,22 +108,21 @@ public class ItServerDiscovery extends BaseTest {
    */
   @Test
   public void testOpConnToNewMS() throws Exception {
-    Assumptions.assumeTrue(FULLTEST);
-    String testMethodName = new Object() {
-    }.getClass().getEnclosingMethod().getName();
+    Assume.assumeTrue(FULLTEST);
+    String testMethodName = new Object() {}.getClass().getEnclosingMethod().getName();
     logTestBegin(testMethodName);
 
-    LoggerHelper.getLocal().log(Level.INFO, "Stop the Operator");
+    logger.info("Stop the Operator");
     operator.stopUsingReplicas();
 
     String cmd = "kubectl apply -f " + testDomainYamlFile;
-    LoggerHelper.getLocal().log(Level.INFO, "Start a new managed server, managed-server3 using command:\n" + cmd);
+    logger.info("Start a new managed server, managed-server3 using command:\n" + cmd);
     TestUtils.exec(cmd);
 
-    LoggerHelper.getLocal().log(Level.INFO, "Restart the Operator");
+    logger.info("Restart the Operator");
     operator.startUsingReplicas();
 
-    LoggerHelper.getLocal().log(Level.INFO, "Check if the newly created managed-server3 is running");
+    logger.info("Check if the newly created managed-server3 is running");
     int replicas = 3;
     verifyPodReady(replicas);
 
@@ -155,7 +130,7 @@ public class ItServerDiscovery extends BaseTest {
     int msDecrNum = 1;
     scaleDownAndverify(msDecrNum);
 
-    LoggerHelper.getLocal().log(Level.INFO, "SUCCESS - " + testMethodName);
+    logger.info("SUCCESS - " + testMethodName);
   }
 
   /**
@@ -166,9 +141,8 @@ public class ItServerDiscovery extends BaseTest {
    */
   @Test
   public void testOpReconnToDomain() throws Exception {
-    Assumptions.assumeTrue(FULLTEST);
-    String testMethodName = new Object() {
-    }.getClass().getEnclosingMethod().getName();
+    Assume.assumeTrue(FULLTEST);
+    String testMethodName = new Object() {}.getClass().getEnclosingMethod().getName();
     logTestBegin(testMethodName);
 
     Map<String, Object> domainMap = domain.getDomainMap();
@@ -179,15 +153,15 @@ public class ItServerDiscovery extends BaseTest {
     String managedServerNameBase = domainMap.get("managedServerNameBase").toString();
     final String clusterName = domainMap.get("clusterName").toString();
 
-    LoggerHelper.getLocal().log(Level.INFO, "Stop the Operator");
+    logger.info("Stop the Operator");
     operator.stopUsingReplicas();
 
     // Stop admin server
     String cmd = "kubectl delete po/" + adminServerPodName + " -n " + domainNS;
-    LoggerHelper.getLocal().log(Level.INFO, "Stop admin server <" + adminServerPodName + "> using command:\n" + cmd);
+    logger.info("Stop admin server <" + adminServerPodName + "> using command:\n" + cmd);
     TestUtils.exec(cmd);
 
-    LoggerHelper.getLocal().log(Level.INFO, "Check if admin pod <" + adminServerPodName + "> is deleted");
+    logger.info("Check if admin pod <" + adminServerPodName + "> is deleted");
     TestUtils.checkPodDeleted(adminServerPodName, domainNS);
 
     // Stop all managed servers in the cluster
@@ -196,26 +170,26 @@ public class ItServerDiscovery extends BaseTest {
     for (int i = 1; i <= replicaCnt; i++) {
       String msPodName = domainUid + "-" + managedServerNameBase + i;
       cmd = "kubectl delete po/" + msPodName + " -n " + domainNS;
-      LoggerHelper.getLocal().log(Level.INFO, "Stop managed server <" + msPodName + "> using command:\n" + cmd);
+      logger.info("Stop managed server <" + msPodName + "> using command:\n" + cmd);
       TestUtils.exec(cmd);
 
-      LoggerHelper.getLocal().log(Level.INFO, "Checking if ms pod <" + msPodName + "> is deleted");
+      logger.info("Checking if ms pod <" + msPodName + "> is deleted");
       TestUtils.checkPodDeleted(msPodName, domainNS);
     }
 
-    LoggerHelper.getLocal().log(Level.INFO, "Restart the Operator");
+    logger.info("Restart the Operator");
     operator.startUsingReplicas();
 
-    LoggerHelper.getLocal().log(Level.INFO, "Check if admin pod <" + adminServerPodName + "> is running");
+    logger.info("Check if admin pod <" + adminServerPodName + "> is running");
     TestUtils.checkPodReady(adminServerPodName, domainNS);
 
     for (int i = 1; i <= replicaCnt; i++) {
       String msPodName = domainUid + "-" + managedServerNameBase + i;
-      LoggerHelper.getLocal().log(Level.INFO, "Checking if ms pod <" + msPodName + "> is running");
+      logger.info("Checking if ms pod <" + msPodName + "> is running");
       TestUtils.checkPodReady(msPodName, domainNS);
     }
 
-    LoggerHelper.getLocal().log(Level.INFO, "SUCCESS - " + testMethodName);
+    logger.info("SUCCESS - " + testMethodName);
   }
 
   private void scaleDownAndverify(int decrNum) throws Exception {
@@ -230,10 +204,10 @@ public class ItServerDiscovery extends BaseTest {
     int replicas = replicaCnt - decrNum;
     String podName = domainUid + "-" + managedServerNameBase + replicaCnt;
 
-    LoggerHelper.getLocal().log(Level.INFO, "Scale domain " + domainUid + " down to " + replicas + " managed servers");
+    logger.info("Scale domain " + domainUid + " down to " + replicas + " managed servers");
     operator.scale(domainUid, clusterName, replicas);
 
-    LoggerHelper.getLocal().log(Level.INFO, "Checking if managed pod <" + podName + "> is deleted");
+    logger.info("Checking if managed pod <" + podName + "> is deleted");
     TestUtils.checkPodDeleted(podName, domainNS);
 
     replicaCnt = TestUtils.getClusterReplicas(domainUid, clusterName, domainNS);
@@ -255,13 +229,13 @@ public class ItServerDiscovery extends BaseTest {
 
     String podName = domainUid + "-" + managedServerNameBase + replicas;
 
-    LoggerHelper.getLocal().log(Level.INFO, "Checking if managed pod <" + podName + "> is created");
+    logger.info("Checking if managed pod <" + podName + "> is created");
     TestUtils.checkPodCreated(podName, domainNS);
 
-    LoggerHelper.getLocal().log(Level.INFO, "Checking if managed server <" + podName + "> is running");
+    logger.info("Checking if managed server <" + podName + "> is running");
     TestUtils.checkPodReady(podName, domainNS);
 
-    LoggerHelper.getLocal().log(Level.INFO, "Checking if managed service <" + podName + "> is created");
+    logger.info("Checking if managed service <" + podName + "> is created");
     TestUtils.checkServiceCreated(podName, domainNS);
 
     int replicaCnt = TestUtils.getClusterReplicas(domainUid, clusterName, domainNS);

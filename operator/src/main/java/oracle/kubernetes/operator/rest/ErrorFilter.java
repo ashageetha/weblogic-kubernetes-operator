@@ -1,8 +1,9 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.rest;
 
+import java.io.IOException;
 import javax.annotation.Priority;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerResponseContext;
@@ -21,14 +22,14 @@ import oracle.kubernetes.operator.rest.model.ErrorModel;
 @Priority(FilterPriorities.ERROR_FILTER_PRIORITY)
 public class ErrorFilter implements ContainerResponseFilter {
 
-  private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
+  private static LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
 
   public ErrorFilter() {
     // nothing to do
   }
 
   @Override
-  public void filter(ContainerRequestContext req, ContainerResponseContext res) {
+  public void filter(ContainerRequestContext req, ContainerResponseContext res) throws IOException {
     LOGGER.entering();
     int status = res.getStatus();
     LOGGER.finer("status=" + status);

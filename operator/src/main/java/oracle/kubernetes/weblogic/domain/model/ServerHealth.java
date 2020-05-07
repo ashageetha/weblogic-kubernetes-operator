@@ -1,26 +1,25 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.weblogic.domain.model;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 import javax.validation.Valid;
 
 import com.google.gson.annotations.Expose;
+import com.google.gson.annotations.SerializedName;
 import oracle.kubernetes.json.Description;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.joda.time.DateTime;
 
-import static oracle.kubernetes.weblogic.domain.model.ObjectPatch.createObjectPatch;
-
 /** ServerHealth describes the current status and health of a specific WebLogic Server. */
 public class ServerHealth {
 
   @Description("RFC 3339 date and time at which the server started.")
+  @SerializedName("activationTime")
   @Expose
   private DateTime activationTime;
 
@@ -29,34 +28,32 @@ public class ServerHealth {
           + "failed to read the health. If the value is \"Not available (possibly overloaded)\", the "
           + "operator has failed to read the health of the server possibly due to the server is "
           + "in overloaded state.")
+  @SerializedName("overallHealth")
   @Expose
   private String overallHealth;
 
   @Description("Status of unhealthy subsystems, if any.")
+  @SerializedName("subsystems")
   @Expose
   @Valid
   private List<SubsystemHealth> subsystems = new ArrayList<>();
-
-  public ServerHealth() {
-  }
-
-  /**
-   * Copy constructor.
-   * @param other the object to deep-copy
-   */
-  ServerHealth(ServerHealth other) {
-    this.activationTime = other.activationTime;
-    this.overallHealth = other.overallHealth;
-    this.subsystems = other.subsystems.stream().map(SubsystemHealth::new).collect(Collectors.toList());
-  }
 
   /**
    * RFC 3339 date and time at which the server started.
    *
    * @return activation time
    */
-  private DateTime getActivationTime() {
+  public DateTime getActivationTime() {
     return activationTime;
+  }
+
+  /**
+   * RFC 3339 date and time at which the server started.
+   *
+   * @param activationTime activation time
+   */
+  public void setActivationTime(DateTime activationTime) {
+    this.activationTime = activationTime;
   }
 
   /**
@@ -83,6 +80,15 @@ public class ServerHealth {
    * Server health of this WebLogic server.
    *
    * @param overallHealth overall health
+   */
+  public void setOverallHealth(String overallHealth) {
+    this.overallHealth = overallHealth;
+  }
+
+  /**
+   * Server health of this WebLogic server.
+   *
+   * @param overallHealth overall health
    * @return this
    */
   public ServerHealth withOverallHealth(String overallHealth) {
@@ -100,13 +106,22 @@ public class ServerHealth {
   }
 
   /**
-   * Add the status of an unhealthy subsystem.
+   * Status of unhealthy subsystems, if any.
    *
-   * @param subsystem the unhealthy subsystem
+   * @param subsystems subsystems
+   */
+  public void setSubsystems(List<SubsystemHealth> subsystems) {
+    this.subsystems = subsystems;
+  }
+
+  /**
+   * Status of unhealthy subsystems, if any.
+   *
+   * @param subsystems subsystems
    * @return this
    */
-  public ServerHealth addSubsystem(SubsystemHealth subsystem) {
-    subsystems.add(subsystem);
+  public ServerHealth withSubsystems(List<SubsystemHealth> subsystems) {
+    this.subsystems = subsystems;
     return this;
   }
 
@@ -142,14 +157,5 @@ public class ServerHealth {
         .append(activationTime, rhs.activationTime)
         .append(Domain.sortOrNull(subsystems), Domain.sortOrNull(rhs.subsystems))
         .isEquals();
-  }
-
-  private static final ObjectPatch<ServerHealth> healthPatch = createObjectPatch(ServerHealth.class)
-        .withDateTimeField("activationTime", ServerHealth::getActivationTime)
-        .withStringField("overallHealth", ServerHealth::getOverallHealth)
-        .withListField("subsystems", SubsystemHealth.getObjectPatch(), ServerHealth::getSubsystems);
-
-  static ObjectPatch<ServerHealth> getObjectPatch() {
-    return healthPatch;
   }
 }

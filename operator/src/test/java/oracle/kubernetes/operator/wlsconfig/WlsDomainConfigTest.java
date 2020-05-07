@@ -1,4 +1,4 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.wlsconfig;
@@ -40,6 +40,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+/** Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved. */
 public class WlsDomainConfigTest {
 
   // The log messages to be checked during this test
@@ -353,9 +354,6 @@ public class WlsDomainConfigTest {
   private List<LogRecord> logRecords = new ArrayList<>();
   private List<Memento> mementos = new ArrayList<>();
 
-  /**
-   * Setup test.
-   */
   @Before
   public void setup() {
     mementos.add(
@@ -365,14 +363,9 @@ public class WlsDomainConfigTest {
     mementos.add(TestUtils.silenceJsonPathLogger());
   }
 
-  /**
-   * Tear down test.
-   */
   @After
   public void tearDown() {
-    for (Memento memento : mementos) {
-      memento.revert();
-    }
+    for (Memento memento : mementos) memento.revert();
   }
 
   @Test
@@ -824,9 +817,7 @@ public class WlsDomainConfigTest {
     protected boolean matchesSafely(
         List<Map<String, Object>> configs, Description mismatchDescription) {
       for (Map<String, Object> config : configs) {
-        if (isExpectedConfig(config)) {
-          return true;
-        }
+        if (isExpectedConfig(config)) return true;
       }
 
       mismatchDescription.appendText(configs.toString());

@@ -1,4 +1,4 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.calls;
@@ -12,13 +12,6 @@ public final class RequestParams {
   public final Object body;
   private CallParams callParams;
 
-  /**
-   * Construct request params.
-   * @param call call
-   * @param namespace namespace
-   * @param name name
-   * @param body body
-   */
   public RequestParams(String call, String namespace, String name, Object body) {
     this.call = call;
     this.namespace = namespace;
@@ -26,14 +19,6 @@ public final class RequestParams {
     this.body = body;
   }
 
-  /**
-   * Construct request params.
-   * @param call call
-   * @param namespace namespace
-   * @param name name
-   * @param body body
-   * @param callParams call params
-   */
   public RequestParams(
       String call, String namespace, String name, Object body, CallParams callParams) {
     this.call = call;

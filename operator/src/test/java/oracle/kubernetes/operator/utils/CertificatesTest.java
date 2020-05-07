@@ -1,13 +1,11 @@
-// Copyright (c) 2019, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
 
+import java.io.FileNotFoundException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
 
 import com.meterware.simplestub.Memento;
 import oracle.kubernetes.utils.TestUtils;
@@ -15,40 +13,24 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import static oracle.kubernetes.operator.logging.MessageKeys.NO_EXTERNAL_CERTIFICATE;
-import static oracle.kubernetes.operator.logging.MessageKeys.NO_INTERNAL_CERTIFICATE;
-import static oracle.kubernetes.utils.LogMatcher.containsInfo;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.junit.MatcherAssert.assertThat;
 
 public class CertificatesTest {
-
-  private final TestUtils.ConsoleHandlerMemento consoleHandlerMemento = TestUtils.silenceOperatorLogger();
-  private Collection<LogRecord> logRecords = new ArrayList<>();
   private List<Memento> mementos = new ArrayList<>();
 
-  /**
-   * Setup test environment.
-   * @throws Exception if test support fails to install.
-   */
   @Before
   public void setUp() throws Exception {
-    mementos.add(consoleHandlerMemento
-          .collectLogMessages(logRecords, NO_INTERNAL_CERTIFICATE, NO_EXTERNAL_CERTIFICATE)
-          .withLogLevel(Level.INFO));
+    mementos.add(
+        TestUtils.silenceOperatorLogger().ignoringLoggedExceptions(FileNotFoundException.class));
     mementos.add(InMemoryCertificates.installWithoutData());
   }
 
-  /**
-   * Cleanup test environment.
-   */
   @After
   public void tearDown() {
-    for (Memento memento : mementos) {
-      memento.revert();
-    }
+    for (Memento memento : mementos) memento.revert();
   }
 
   @Test
@@ -79,16 +61,7 @@ public class CertificatesTest {
 
   @Test
   public void whenNoExternalCertificateFile_returnNull() {
-    consoleHandlerMemento.ignoreMessage(NO_EXTERNAL_CERTIFICATE);
-
     assertThat(Certificates.getOperatorExternalCertificateData(), nullValue());
-  }
-
-  @Test
-  public void whenNoExternalCertificateFile_logInfoMessage() {
-    assertThat(Certificates.getOperatorExternalCertificateData(), nullValue());
-
-    assertThat(logRecords, containsInfo(NO_EXTERNAL_CERTIFICATE));
   }
 
   @Test
@@ -100,16 +73,7 @@ public class CertificatesTest {
 
   @Test
   public void whenNoInternalCertificateFile_returnNull() {
-    consoleHandlerMemento.ignoreMessage(NO_INTERNAL_CERTIFICATE);
-
     assertThat(Certificates.getOperatorInternalCertificateData(), nullValue());
-  }
-
-  @Test
-  public void whenNoInternalCertificateFile_logInfoMessage() {
-    Certificates.getOperatorInternalCertificateData();
-
-    assertThat(logRecords, containsInfo(NO_INTERNAL_CERTIFICATE));
   }
 
   @Test

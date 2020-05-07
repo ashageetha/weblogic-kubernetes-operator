@@ -1,4 +1,4 @@
-// Copyright (c) 2019, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
@@ -12,9 +12,6 @@ import java.util.function.Function;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
 
-import static oracle.kubernetes.operator.logging.MessageKeys.NO_EXTERNAL_CERTIFICATE;
-import static oracle.kubernetes.operator.logging.MessageKeys.NO_INTERNAL_CERTIFICATE;
-
 public class Certificates {
   private static final String OPERATOR_DIR = "/operator/";
   private static final String EXTERNAL_ID_DIR = OPERATOR_DIR + "external-identity/";
@@ -23,7 +20,7 @@ public class Certificates {
   private static final String INTERNAL_ID_DIR = OPERATOR_DIR + "internal-identity/";
   static final String INTERNAL_CERTIFICATE_KEY = INTERNAL_ID_DIR + "internalOperatorKey";
   static final String INTERNAL_CERTIFICATE = INTERNAL_ID_DIR + "internalOperatorCert";
-  private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
+  private static LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
   private static Function<String, Path> GET_PATH = p -> Paths.get(p);
 
   public static String getOperatorExternalKeyFile() {
@@ -39,18 +36,18 @@ public class Certificates {
   }
 
   public static String getOperatorExternalCertificateData() {
-    return getCertificate(Certificates.EXTERNAL_CERTIFICATE, NO_EXTERNAL_CERTIFICATE);
+    return getCertificate(Certificates.EXTERNAL_CERTIFICATE);
   }
 
   public static String getOperatorInternalCertificateData() {
-    return getCertificate(Certificates.INTERNAL_CERTIFICATE, NO_INTERNAL_CERTIFICATE);
+    return getCertificate(Certificates.INTERNAL_CERTIFICATE);
   }
 
-  private static String getCertificate(String path, String failureMessage) {
+  private static String getCertificate(String path) {
     try {
       return new String(Files.readAllBytes(GET_PATH.apply(path)));
     } catch (IOException e) {
-      LOGGER.info(failureMessage, path);
+      LOGGER.warning("Can't read certificate at " + path, e);
       return null;
     }
   }

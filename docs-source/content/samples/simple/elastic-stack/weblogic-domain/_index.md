@@ -2,7 +2,7 @@
 title: "WebLogic domain"
 date: 2019-10-01T14:32:31-05:00
 weight: 2
-description: "Sample for using Fluentd for WebLogic domain and operator's logs."
+description: "Sample for using Fluentd for WebLogic domain and operator's logs"
 ---
 
 
@@ -120,10 +120,6 @@ data:
         format11 / <(?<severity>(.*?))>/
         format12 / <(?<messageID>(.*?))>/
         format13 / <(?<message>(.*?))>/
-        # use the timestamp field in the message as the timestamp
-        # instead of the time the message was actually read 
-        time_key timestamp
-        keep_time_key true
       </parse>
     </source>
     <match **>
@@ -135,12 +131,6 @@ data:
       index_name "#{ENV['DOMAIN_UID']}"
       scheme https
       ssl_version TLSv1_2
-      key_name timestamp 
-      types timestamp:time
-      # inject the @timestamp special field (as type time) into the record
-      # so you will be able to do time based queries.
-      # not to be confused with timestamp which is of type string!!!
-      include_timestamp true
     </match>
 EOF
 ```

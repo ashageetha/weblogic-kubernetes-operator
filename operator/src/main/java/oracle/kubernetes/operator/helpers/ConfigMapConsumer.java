@@ -1,4 +1,4 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helpers;
@@ -32,14 +32,9 @@ public class ConfigMapConsumer implements Map<String, String> {
   private final AtomicReference<ScheduledFuture<?>> future = new AtomicReference<>(null);
   private final Runnable onUpdate;
 
-  /**
-   * Construct config map consumer.
-   * @param executorService executor
-   * @param mountPoint mount point
-   * @param onUpdate on update flag
-   */
   public ConfigMapConsumer(
-      ScheduledExecutorService executorService, String mountPoint, Runnable onUpdate) {
+      ScheduledExecutorService executorService, String mountPoint, Runnable onUpdate)
+      throws IOException {
     this.threadPool = executorService;
     this.mountPointDir = new File(mountPoint);
     this.onUpdate = onUpdate;
@@ -65,12 +60,6 @@ public class ConfigMapConsumer implements Map<String, String> {
     }
   }
 
-  /**
-   * read tuning parameter.
-   * @param parameter parameter
-   * @param defaultValue default value
-   * @return parameter value
-   */
   public long readTuningParameter(String parameter, long defaultValue) {
     String val = get(parameter);
     if (val != null) {

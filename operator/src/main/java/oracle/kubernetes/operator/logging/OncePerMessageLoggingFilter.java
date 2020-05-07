@@ -1,4 +1,4 @@
-// Copyright (c) 2019, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.logging;
@@ -12,7 +12,7 @@ public class OncePerMessageLoggingFilter implements LoggingFilter {
   // allow all messages to be logged when filtering is off
   boolean filtering = false;
 
-  final Set messagesLogged = new HashSet();
+  Set messagesLogged = new HashSet();
 
   /**
    * Turn on or off the filtering of log messages and skip logging of messages that have already

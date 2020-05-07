@@ -1,4 +1,4 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.helm;
@@ -18,7 +18,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import com.google.common.io.CharStreams;
 import oracle.kubernetes.operator.utils.PathUtils;
 import oracle.kubernetes.operator.utils.YamlReader;
 import org.yaml.snakeyaml.Yaml;
@@ -62,9 +61,7 @@ public class ProcessedChart implements YamlReader {
     String line;
     BufferedReader br = new BufferedReader(new InputStreamReader(in));
 
-    while (((line = br.readLine()) != null)) {
-      sb.append(line).append(System.lineSeparator());
-    }
+    while (((line = br.readLine()) != null)) sb.append(line).append(System.lineSeparator());
 
     return sb.toString();
   }
@@ -102,9 +99,7 @@ public class ProcessedChart implements YamlReader {
           .loadAll(getProcess().getInputStream())
           .forEach(
               (document) -> {
-                if (document != null) {
-                  documents.add(document);
-                }
+                if (document != null) documents.add(document);
               });
 
       this.documents = documents;
@@ -132,22 +127,6 @@ public class ProcessedChart implements YamlReader {
   }
 
   private Process processChart() throws Exception {
-    // determine Helm version
-    Process vp = new ProcessBuilder(new String[] {
-        "helm", "version", "--client", "--short"
-    }).start();
-    vp.waitFor();
-    String version = CharStreams.toString(new InputStreamReader(vp.getInputStream()));
-
-    boolean isHelm3;
-    if (version.startsWith("v3.")) {
-      isHelm3 = true;
-    } else if (version.startsWith("Client: v2.") || version.startsWith("v2.")) {
-      isHelm3 = false;
-    } else {
-      throw new IllegalArgumentException("Helm version unrecognized: " + version);
-    }
-
     File chartsDir = getChartDir(installArgs.getChartName());
     File baseValuesFile = new File(chartsDir, "values.yaml");
     values = new Yaml().load(new FileReader(baseValuesFile));
@@ -155,7 +134,7 @@ public class ProcessedChart implements YamlReader {
 
     Path valuesFile = writeValuesOverride(installArgs.getValueOverrides());
 
-    ProcessBuilder pb = new ProcessBuilder(createCommandLine(isHelm3, chartsDir, valuesFile));
+    ProcessBuilder pb = new ProcessBuilder(createCommandLine(chartsDir, valuesFile));
     Process p = pb.start();
     p.waitFor();
     return p;
@@ -165,19 +144,7 @@ public class ProcessedChart implements YamlReader {
     values.putAll(valueOverrides);
   }
 
-  private String[] createCommandLine(boolean isHelm3, File chart, Path valuesPath) {
-    if (isHelm3) {
-      return new String[] {
-          "helm",
-          "template",
-          installArgs.getReleaseName(),
-          chart.getAbsolutePath(),
-          "-f",
-          valuesPath.toString(),
-          "--namespace",
-          installArgs.getNamespace()
-      };
-    }
+  private String[] createCommandLine(File chart, Path valuesPath) {
     return new String[] {
       "helm",
       "template",

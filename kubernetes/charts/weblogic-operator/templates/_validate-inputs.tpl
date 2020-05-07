@@ -1,4 +1,4 @@
-# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 # Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 {{- define "operator.validateInputs" -}}
@@ -39,7 +39,6 @@
 {{-     $ignore := include "utils.verifyInteger" (list $scope "elasticSearchPort") -}}
 {{-   end -}}
 {{- end -}}
-{{- $ignore := include "utils.verifyOptionalBoolean" (list $scope "dedicated") -}}
 {{- $ignore := include "utils.verifyOptionalBoolean" (list $scope "mockWLS") -}}
-{{- $ignore := include "utils.endValidation" $scope -}}
+{{- $ignore:= include "utils.endValidation" $scope -}}
 {{- end -}}

@@ -1,4 +1,4 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator;
@@ -15,18 +15,17 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nullable;
 
-import io.kubernetes.client.openapi.models.V1ConfigMap;
-import io.kubernetes.client.openapi.models.V1ContainerState;
-import io.kubernetes.client.openapi.models.V1ContainerStatus;
-import io.kubernetes.client.openapi.models.V1Event;
-import io.kubernetes.client.openapi.models.V1ObjectMeta;
-import io.kubernetes.client.openapi.models.V1ObjectReference;
-import io.kubernetes.client.openapi.models.V1Pod;
-import io.kubernetes.client.openapi.models.V1PodList;
-import io.kubernetes.client.openapi.models.V1PodStatus;
-import io.kubernetes.client.openapi.models.V1Service;
-import io.kubernetes.client.openapi.models.V1ServiceList;
-import io.kubernetes.client.openapi.models.V1SubjectRulesReviewStatus;
+import io.kubernetes.client.models.V1ConfigMap;
+import io.kubernetes.client.models.V1ContainerState;
+import io.kubernetes.client.models.V1ContainerStatus;
+import io.kubernetes.client.models.V1Event;
+import io.kubernetes.client.models.V1ObjectMeta;
+import io.kubernetes.client.models.V1ObjectReference;
+import io.kubernetes.client.models.V1Pod;
+import io.kubernetes.client.models.V1PodList;
+import io.kubernetes.client.models.V1PodStatus;
+import io.kubernetes.client.models.V1Service;
+import io.kubernetes.client.models.V1ServiceList;
 import io.kubernetes.client.util.Watch;
 import oracle.kubernetes.operator.TuningParameters.MainTuning;
 import oracle.kubernetes.operator.calls.CallResponse;
@@ -34,7 +33,7 @@ import oracle.kubernetes.operator.helpers.CallBuilder;
 import oracle.kubernetes.operator.helpers.ConfigMapHelper;
 import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
 import oracle.kubernetes.operator.helpers.DomainStatusPatch;
-import oracle.kubernetes.operator.helpers.DomainValidationSteps;
+import oracle.kubernetes.operator.helpers.DomainValidationStep;
 import oracle.kubernetes.operator.helpers.JobHelper;
 import oracle.kubernetes.operator.helpers.KubernetesUtils;
 import oracle.kubernetes.operator.helpers.PodHelper;
@@ -73,11 +72,11 @@ public class DomainProcessorImpl implements DomainProcessor {
   private static final Map<String, FiberGate> makeRightFiberGates = new ConcurrentHashMap<>();
   private static final Map<String, FiberGate> statusFiberGates = new ConcurrentHashMap<>();
   // Map from namespace to map of domainUID to Domain
-  private static Map<String, Map<String, DomainPresenceInfo>> DOMAINS =
+  private static final Map<String, Map<String, DomainPresenceInfo>> DOMAINS =
         new ConcurrentHashMap<>();
   private static final ConcurrentMap<String, ConcurrentMap<String, ScheduledFuture<?>>>
         statusUpdaters = new ConcurrentHashMap<>();
-  private final DomainProcessorDelegate delegate;
+  private DomainProcessorDelegate delegate;
 
   public DomainProcessorImpl(DomainProcessorDelegate delegate) {
     this.delegate = delegate;
@@ -121,17 +120,13 @@ public class DomainProcessorImpl implements DomainProcessor {
 
   private static void onEvent(V1Event event) {
     V1ObjectReference ref = event.getInvolvedObject();
-    if (ref == null) {
-      return;
-    }
+    if (ref == null) return;
 
     String[] domainAndServer = ref.getName().split("-");
     String domainUid = domainAndServer[0];
     String serverName = domainAndServer[1];
     String status = getReadinessStatus(event);
-    if (status == null) {
-      return;
-    }
+    if (status == null) return;
 
     Optional.ofNullable(DOMAINS.get(event.getMetadata().getNamespace()))
           .map(m -> m.get(domainUid))
@@ -198,10 +193,6 @@ public class DomainProcessorImpl implements DomainProcessor {
     return statusFiberGates.computeIfAbsent(ns, k -> delegate.createFiberGate());
   }
 
-  /**
-   * Stop namespace.
-   * @param ns namespace
-   */
   public void stopNamespace(String ns) {
     Map<String, DomainPresenceInfo> map = DOMAINS.get(ns);
     if (map != null) {
@@ -218,28 +209,19 @@ public class DomainProcessorImpl implements DomainProcessor {
     }
   }
 
-  /**
-   * Dispatch pod watch event.
-   * @param item watch event
-   */
   public void dispatchPodWatch(Watch.Response<V1Pod> item) {
-    if (getPodLabel(item.object, LabelConstants.DOMAINUID_LABEL) == null) {
-      return;
-    }
+    if (getPodLabel(item.object, LabelConstants.DOMAINUID_LABEL) == null) return;
 
-    if (getPodLabel(item.object, LabelConstants.SERVERNAME_LABEL) != null) {
+    if (getPodLabel(item.object, LabelConstants.SERVERNAME_LABEL) != null)
       processServerPodWatch(item.object, item.type);
-    } else if (getPodLabel(item.object, LabelConstants.JOBNAME_LABEL) != null) {
+    else if (getPodLabel(item.object, LabelConstants.JOBNAME_LABEL) != null)
       processIntrospectorJobPodWatch(item.object, item.type);
-    }
   }
 
   private void processServerPodWatch(V1Pod pod, String watchType) {
     String domainUid = getPodLabel(pod, LabelConstants.DOMAINUID_LABEL);
     DomainPresenceInfo info = getExistingDomainPresenceInfo(getNamespace(pod), domainUid);
-    if (info == null) {
-      return;
-    }
+    if (info == null) return;
 
     String serverName = getPodLabel(pod, LabelConstants.SERVERNAME_LABEL);
     switch (watchType) {
@@ -280,9 +262,7 @@ public class DomainProcessorImpl implements DomainProcessor {
   private void processIntrospectorJobPodWatch(V1Pod pod, String watchType) {
     String domainUid = getPodLabel(pod, LabelConstants.DOMAINUID_LABEL);
     DomainPresenceInfo info = getExistingDomainPresenceInfo(getNamespace(pod), domainUid);
-    if (info == null) {
-      return;
-    }
+    if (info == null) return;
 
     switch (watchType) {
       case "ADDED":
@@ -299,22 +279,14 @@ public class DomainProcessorImpl implements DomainProcessor {
    * a MODIFIED event for an object that has already had subsequent modifications.
    */
 
-  /**
-   * Dispatch service watch event.
-   * @param item watch event
-   */
   public void dispatchServiceWatch(Watch.Response<V1Service> item) {
     V1Service service = item.object;
     String domainUid = ServiceHelper.getServiceDomainUid(service);
-    if (domainUid == null) {
-      return;
-    }
+    if (domainUid == null) return;
 
     DomainPresenceInfo info =
         getExistingDomainPresenceInfo(service.getMetadata().getNamespace(), domainUid);
-    if (info == null) {
-      return;
-    }
+    if (info == null) return;
 
     switch (item.type) {
       case "ADDED":
@@ -323,18 +295,12 @@ public class DomainProcessorImpl implements DomainProcessor {
         break;
       case "DELETED":
         boolean removed = ServiceHelper.deleteFromEvent(info, item.object);
-        if (removed && info.isNotDeleting()) {
-          makeRightDomainPresence(info, true, false, true);
-        }
+        if (removed && info.isNotDeleting()) makeRightDomainPresence(info, true, false, true);
         break;
       default:
     }
   }
 
-  /**
-   * Dispatch config map watch event.
-   * @param item watch event
-   */
   public void dispatchConfigMapWatch(Watch.Response<V1ConfigMap> item) {
     V1ConfigMap c = item.object;
     if (c != null) {
@@ -352,10 +318,6 @@ public class DomainProcessorImpl implements DomainProcessor {
     }
   }
 
-  /**
-   * Dispatch event watch event.
-   * @param item watch event
-   */
   public void dispatchEventWatch(Watch.Response<V1Event> item) {
     V1Event e = item.object;
     if (e != null) {
@@ -414,17 +376,15 @@ public class DomainProcessorImpl implements DomainProcessor {
         delegate.scheduleWithFixedDelay(
             () -> {
               try {
-                V1SubjectRulesReviewStatus srrs = delegate.getSubjectRulesReviewStatus(info.getNamespace());
                 Packet packet = new Packet();
                 packet
                     .getComponents()
                     .put(
                         ProcessingConstants.DOMAIN_COMPONENT_NAME,
-                        Component.createFor(info, delegate.getVersion(),
-                            V1SubjectRulesReviewStatus.class, srrs));
+                        Component.createFor(info, delegate.getVersion()));
                 packet.put(LoggingFilter.LOGGING_FILTER_PACKET_KEY, loggingFilter);
                 Step strategy =
-                    ServerStatusReader.createStatusStep(main.statusUpdateTimeoutSeconds, null);
+                    DomainStatusUpdater.createStatusStep(main.statusUpdateTimeoutSeconds, null);
                 FiberGate gate = getStatusFiberGate(info.getNamespace());
 
                 Fiber f =
@@ -460,13 +420,6 @@ public class DomainProcessorImpl implements DomainProcessor {
             TimeUnit.SECONDS));
   }
 
-  /**
-   * Begin activity to align domain status with domain resource.
-   * @param info domain presence info
-   * @param explicitRecheck if explicit recheck
-   * @param isDeleting if is deleting domain
-   * @param isWillInterrupt if will interrupt already running activities
-   */
   public void makeRightDomainPresence(
       DomainPresenceInfo info,
       boolean explicitRecheck,
@@ -508,9 +461,7 @@ public class DomainProcessorImpl implements DomainProcessor {
 
   private void internalMakeRightDomainPresence(
       @Nullable DomainPresenceInfo info, boolean isDeleting, boolean isWillInterrupt) {
-    if (info == null) {
-      return;
-    }
+    if (info == null) return;
 
     String ns = info.getNamespace();
     String domainUid = info.getDomainUid();
@@ -520,25 +471,14 @@ public class DomainProcessorImpl implements DomainProcessor {
       Step strategy =
           new StartPlanStep(
               info, isDeleting ? createDomainDownPlan(info) : createDomainUpPlan(info));
-      if (!isDeleting && dom != null) {
-        strategy = DomainValidationSteps.createDomainValidationSteps(ns, strategy);
-      }
+      if (!isDeleting && dom != null)
+        strategy = new DomainValidationStep(dom, strategy);
 
-      PodAwaiterStepFactory pw = delegate.getPodAwaiterStepFactory(info.getNamespace());
-      V1SubjectRulesReviewStatus srrs = delegate.getSubjectRulesReviewStatus(info.getNamespace());
-      Packet packet = new Packet();
-      packet
-          .getComponents()
-          .put(
-              ProcessingConstants.DOMAIN_COMPONENT_NAME,
-              Component.createFor(info, delegate.getVersion(),
-                  PodAwaiterStepFactory.class, pw,
-                  V1SubjectRulesReviewStatus.class, srrs));
       runDomainPlan(
           dom,
           domainUid,
           ns,
-          new StepAndPacket(strategy, packet),
+          new StepAndPacket(strategy, new Packet()),
           isDeleting,
           isWillInterrupt);
     }
@@ -780,7 +720,13 @@ public class DomainProcessorImpl implements DomainProcessor {
 
     @Override
     public NextAction apply(Packet packet) {
+      PodAwaiterStepFactory pw = delegate.getPodAwaiterStepFactory(info.getNamespace());
       info.setDeleting(false);
+      packet
+            .getComponents()
+            .put(
+                  ProcessingConstants.DOMAIN_COMPONENT_NAME,
+                  Component.createFor(info, delegate.getVersion(), PodAwaiterStepFactory.class, pw));
       return doNext(packet);
     }
   }
@@ -818,14 +764,20 @@ public class DomainProcessorImpl implements DomainProcessor {
     public NextAction apply(Packet packet) {
       info.setDeleting(true);
       unregisterStatusUpdater(ns, info.getDomainUid());
+      PodAwaiterStepFactory pw = delegate.getPodAwaiterStepFactory(ns);
+      packet
+            .getComponents()
+            .put(
+                  ProcessingConstants.DOMAIN_COMPONENT_NAME,
+                  Component.createFor(info, delegate.getVersion(), PodAwaiterStepFactory.class, pw));
       return doNext(packet);
     }
   }
 
   private class DomainStatusUpdate {
-    private final Domain domain;
-    private final V1Pod pod;
-    private final String domainUid;
+    private Domain domain;
+    private V1Pod pod;
+    private String domainUid;
 
     DomainStatusUpdate(Domain domain, V1Pod pod, String domainUid) {
       this.domain = domain;
@@ -841,9 +793,7 @@ public class DomainProcessorImpl implements DomainProcessor {
     }
 
     private void updateStatus(String reason, String message) {
-      if (reason == null || message == null) {
-        return;
-      }
+      if (reason == null || message == null) return;
       
       DomainStatusPatch.updateSynchronously(domain, reason, message);
     }

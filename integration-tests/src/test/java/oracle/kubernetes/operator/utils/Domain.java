@@ -1,4 +1,4 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
@@ -25,6 +25,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 import javax.jms.ConnectionFactory;
 import javax.jms.QueueConnection;
 import javax.jms.QueueConnectionFactory;
@@ -34,15 +35,18 @@ import javax.naming.InitialContext;
 import oracle.kubernetes.operator.BaseTest;
 import org.yaml.snakeyaml.Yaml;
 
-/**
- * Domain class with all the utility methods for a Domain.
- */
+/** Domain class with all the utility methods for a Domain. */
 public class Domain {
   public static final String CREATE_DOMAIN_JOB_MESSAGE =
       "Domain base_domain was created and will be started by the WebLogic Kubernetes Operator";
 
+  protected static final Logger logger = Logger.getLogger("OperatorIT", "OperatorIT");
   private static int maxIterations = BaseTest.getMaxIterationsPod(); // 50 * 5 = 250 seconds
   private static int waitTime = BaseTest.getWaitTimePod();
+  // LB_TYPE is an evn var. Set to "VOYAGER" to use it as loadBalancer
+  private static String LB_TYPE;
+  // set INGRESSPERDOMAIN to false to create LB's ingress by kubectl yaml file
+  private static boolean INGRESSPERDOMAIN = true;
   protected Map<String, Object> domainMap;
   protected Map<String, Object> pvMap;
   // attributes from domain properties
@@ -50,9 +54,7 @@ public class Domain {
   // default values as in create-weblogic-domain-inputs.yaml, generated yaml file will have the
   // customized property values
   protected String domainNS;
-  protected String userProjectsDir;
-  protected String resultsDir;
-  protected String pvRoot;
+  protected String userProjectsDir = "";
   protected String generatedInputYamlFile;
   private String adminServerName;
   private String managedServerNameBase;
@@ -68,17 +70,15 @@ public class Domain {
   private int loadBalancerWebPort = 30305;
   private String domainHomeImageBuildPath = "";
   private String projectRoot = "";
-  //set INGRESSPERDOMAIN to false to create LB's ingress by kubectl yaml file
   private boolean ingressPerDomain = true;
   private boolean pvSharing = false;
   private String imageTag;
   private String imageName;
   private boolean voyager;
   private boolean createDomainResource = true;
-  private boolean createLoadBalancer = true;
 
   public Domain() throws Exception {
-    domainMap = new HashMap<String, Object>();
+    domainMap = new HashMap<>();
   }
 
   public Domain(String inputYaml) throws Exception {
@@ -88,39 +88,21 @@ public class Domain {
 
   public Domain(String inputYaml, boolean createDomainResource) throws Exception {
     // read input domain yaml to test
-    this(TestUtils.loadYaml(inputYaml), createDomainResource, true);
+    this(TestUtils.loadYaml(inputYaml), createDomainResource);
   }
-
+  
   public Domain(Map<String, Object> inputDomainMap) throws Exception {
-    this(inputDomainMap, true, true);
+    this(inputDomainMap, true);
   }
 
-  public Domain(Map<String, Object> inputDomainMap, boolean createLoadBalancer) throws Exception {
-    this(inputDomainMap, true, createLoadBalancer);
-  }
-
-  /**
-   * Construct domain.
-   * @param inputDomainMap input domain map
-   * @param createDomainResource create domain resource flag
-   * @param createLoadBalancer create load balancer flag
-   * @throws Exception on failure
-   */
-  public Domain(Map<String, Object> inputDomainMap,
-                boolean createDomainResource, boolean createLoadBalancer)
-      throws Exception {
+  public Domain(Map<String, Object> inputDomainMap, boolean createDomainResource) throws Exception {
     initialize(inputDomainMap);
     this.createDomainResource = createDomainResource;
-    this.createLoadBalancer = createLoadBalancer;
     createPv();
     createSecret();
-    synchronized (Domain.class) {
-      if (createLoadBalancer) {
-        createLoadBalancer();
-      }
-    }
     generateInputYaml();
     callCreateDomainScript(userProjectsDir);
+    createLoadBalancer();
   }
 
   /**
@@ -135,15 +117,10 @@ public class Domain {
     if (!result.stdout().contains(domainUid)) {
       throw new RuntimeException("FAILURE: domain not found, exiting!");
     }
+
     verifyPodsCreated();
     verifyServicesCreated();
     verifyServersReady();
-    if (createLoadBalancer) {
-      String cmd = "curl --silent --noproxy '*' -H 'host: " + domainUid
-          + ".org' http://" + getHostNameForCurl() + ":" + getLoadBalancerWebPort()
-          + "/weblogic/ready --write-out %{http_code} -o /dev/null";
-      callWebAppAndWaitTillReady(cmd);
-    }
   }
 
   /**
@@ -153,14 +130,13 @@ public class Domain {
    */
   public void verifyPodsCreated() throws Exception {
     // check admin pod
-    LoggerHelper.getLocal().log(Level.INFO,
-        "Checking if admin pod(" + domainUid + "-" + adminServerName + ") is Created");
+    logger.info("Checking if admin pod(" + domainUid + "-" + adminServerName + ") is Created");
     TestUtils.checkPodCreated(domainUid + "-" + adminServerName, domainNS);
 
     if (!serverStartPolicy.equals("ADMIN_ONLY")) {
       // check managed server pods
       for (int i = 1; i <= initialManagedServerReplicas; i++) {
-        LoggerHelper.getLocal().log(Level.INFO,
+        logger.info(
             "Checking if managed pod("
                 + domainUid
                 + "-"
@@ -185,17 +161,16 @@ public class Domain {
    * verify services are created.
    *
    * @param precreateService - if true check services are created for configuredManagedServerCount
-   *                         number of servers else check for initialManagedServerReplicas number of servers
+   *     number of servers else check for initialManagedServerReplicas number of servers
    * @throws Exception exception
    */
   public void verifyServicesCreated(boolean precreateService) throws Exception {
     // check admin service
-    LoggerHelper.getLocal().log(Level.INFO,
-        "Checking if admin service(" + domainUid + "-" + adminServerName + ") is created");
+    logger.info("Checking if admin service(" + domainUid + "-" + adminServerName + ") is created");
     TestUtils.checkServiceCreated(domainUid + "-" + adminServerName, domainNS);
 
     if (exposeAdminT3Channel) {
-      LoggerHelper.getLocal().log(Level.INFO,
+      logger.info(
           "Checking if admin t3 channel service("
               + domainUid
               + "-"
@@ -207,9 +182,9 @@ public class Domain {
     if (!serverStartPolicy.equals("ADMIN_ONLY")) {
       // check managed server services
       for (int i = 1;
-           i <= (precreateService ? configuredManagedServerCount : initialManagedServerReplicas);
-           i++) {
-        LoggerHelper.getLocal().log(Level.INFO,
+          i <= (precreateService ? configuredManagedServerCount : initialManagedServerReplicas);
+          i++) {
+        logger.info(
             "Checking if managed service("
                 + domainUid
                 + "-"
@@ -228,13 +203,13 @@ public class Domain {
    */
   public void verifyServersReady() throws Exception {
     // check admin pod
-    LoggerHelper.getLocal().log(Level.INFO, "Checking if admin server is Running and Ready");
+    logger.info("Checking if admin server is Running and Ready");
     TestUtils.checkPodReady(domainUid + "-" + adminServerName, domainNS);
 
     if (!serverStartPolicy.equals("ADMIN_ONLY")) {
       // check managed server pods
       for (int i = 1; i <= initialManagedServerReplicas; i++) {
-        LoggerHelper.getLocal().log(Level.INFO,
+        logger.info(
             "Checking if managed server (" + managedServerNameBase + i + ") is Running and Ready");
         TestUtils.checkPodReady(domainUid + "-" + managedServerNameBase + i, domainNS);
       }
@@ -244,7 +219,7 @@ public class Domain {
     }
     String additionalManagedServer =
         domainUid + "-" + managedServerNameBase + (initialManagedServerReplicas + 1);
-    LoggerHelper.getLocal().log(Level.INFO,
+    logger.info(
         "Checking if managed server " + additionalManagedServer + " is started, it should not be");
     StringBuffer cmd = new StringBuffer();
     cmd.append("kubectl get pod ").append(additionalManagedServer).append(" -n ").append(domainNS);
@@ -256,16 +231,14 @@ public class Domain {
               + additionalManagedServer
               + " is started, but its not expected.");
     } else {
-      LoggerHelper.getLocal().log(Level.INFO,
-          additionalManagedServer + " is not running, which is expected behaviour");
+      logger.info(additionalManagedServer + " is not running, which is expected behaviour");
     }
 
     // check logs are written on PV if logHomeOnPV is true for domain-home-in-image case
     if ((domainMap.containsKey("domainHomeImageBase")
         && domainMap.containsKey("logHomeOnPV")
-        && (new Boolean(domainMap.get("logHomeOnPV").toString())).booleanValue())) {
-      LoggerHelper.getLocal().log(Level.INFO,
-          "logHomeOnPV is true, checking if logs are written on PV");
+        && ((Boolean) domainMap.get("logHomeOnPV")).booleanValue())) {
+      logger.info("logHomeOnPV is true, checking if logs are written on PV");
       cmd = new StringBuffer();
       cmd.append("kubectl -n ")
           .append(domainNS)
@@ -287,8 +260,7 @@ public class Domain {
                 + domainUid
                 + " inside the pod");
       } else {
-        LoggerHelper.getLocal().log(Level.INFO,
-            "Logs are written at /shared/logs/" + domainUid + " inside the pod");
+        logger.info("Logs are written at /shared/logs/" + domainUid + " inside the pod");
       }
     }
   }
@@ -302,12 +274,11 @@ public class Domain {
    */
   public void verifyAdminServerExternalService(String username, String password) throws Exception {
 
-    // LoggerHelper.getLocal().log(Level.INFO, "Inside verifyAdminServerExternalService");
+    // logger.info("Inside verifyAdminServerExternalService");
     if (exposeAdminNodePort) {
       String nodePortHost = getHostNameForCurl();
       String nodePort = getNodePort();
-      LoggerHelper.getLocal().log(Level.INFO,
-          "nodePortHost " + nodePortHost + " nodePort " + nodePort);
+      logger.info("nodePortHost " + nodePortHost + " nodePort " + nodePort);
 
       StringBuffer cmd = new StringBuffer();
       cmd.append("curl --silent --show-error --noproxy ")
@@ -322,18 +293,17 @@ public class Domain {
           .append(":")
           .append(password)
           .append(" -H X-Requested-By:Integration-Test --write-out %{http_code} -o /dev/null");
-      LoggerHelper.getLocal().log(Level.INFO, "cmd for curl " + cmd);
+      logger.info("cmd for curl " + cmd);
       ExecResult result = TestUtils.exec(cmd.toString());
       String output = result.stdout().trim();
-      LoggerHelper.getLocal().log(Level.INFO, "output " + output);
+      logger.info("output " + output);
       if (!output.equals("200")) {
         throw new RuntimeException(
             "FAILURE: accessing admin server REST endpoint did not return 200 status code, "
                 + output);
       }
     } else {
-      LoggerHelper.getLocal().log(Level.INFO,
-          "exposeAdminNodePort is false, can not test adminNodePort");
+      logger.info("exposeAdminNodePort is false, can not test adminNodePort");
     }
   }
 
@@ -341,8 +311,8 @@ public class Domain {
    * Verify that we have the channel set for the cluster.
    *
    * @param protocol protocol
-   * @param port     port
-   * @param path     path
+   * @param port port
+   * @param path path
    * @throws Exception exception
    */
   public void verifyHasClusterServiceChannelPort(String protocol, int port, String path)
@@ -435,10 +405,10 @@ public class Domain {
         .append(getNodePort())
         .append("/management/weblogic/latest/edit/appDeployments")
         .append(" --write-out %{http_code} ");
-    LoggerHelper.getLocal().log(Level.INFO, "Command to deploy webapp " + cmd);
+    logger.info("Command to deploy webapp " + cmd);
     ExecResult result = TestUtils.exec(cmd.toString());
     String output = result.stdout().trim();
-    LoggerHelper.getLocal().log(Level.INFO, "curl output " + output + " \n err " + result.stderr());
+    logger.info("curl output " + output + " \n err " + result.stderr());
     if (!output.contains("202")) {
       throw new RuntimeException("FAILURE: Webapp deployment failed with response code " + output);
     }
@@ -465,7 +435,7 @@ public class Domain {
         .append("/management/weblogic/latest/edit/appDeployments/")
         .append(webappName)
         .append(" --write-out %{http_code} -o /dev/null");
-    LoggerHelper.getLocal().fine("Command to undeploy webapp " + cmd);
+    logger.fine("Command to undeploy webapp " + cmd);
     ExecResult result = TestUtils.exec(cmd.toString());
     String output = result.stdout().trim();
     if (!output.contains("200")) {
@@ -478,22 +448,22 @@ public class Domain {
   /**
    * deploy webapp using t3 channel port for wlst.
    *
-   * @param webappName       webappName
+   * @param webappName webappName
    * @param appLocationInPod appLocation
    * @throws Exception exception
    */
   public void undeployWebAppViaWlst(
-      String webappName,
-      String appLocationInPod)
-      throws Exception {
+          String webappName,
+          String appLocationInPod)
+          throws Exception {
     undeployWebAppViaWlst(webappName, appLocationInPod, false);
   }
 
   /**
    * undeploy webapp using adminPort or t3 channel port.
    *
-   * @param webappName           webappName
-   * @param appLocationInPod     appLocationInPod
+   * @param webappName webappName
+   * @param appLocationInPod appLocationInPod
    * @param useAdminPortToDeploy useAdminPortToDeploy
    * @throws Exception exception
    */
@@ -538,30 +508,30 @@ public class Domain {
   /**
    * deploy webapp using t3 channel port for wlst.
    *
-   * @param webappName     webappName
+   * @param webappName webappName
    * @param webappLocation webappLocation
-   * @param username       username
-   * @param password       password
+   * @param username username
+   * @param password password
    * @throws Exception exception
    */
   public void deployWebAppViaWlst(
-      String webappName,
-      String webappLocation,
-      String appLocationInPod,
-      String username,
-      String password)
-      throws Exception {
+          String webappName,
+          String webappLocation,
+          String appLocationInPod,
+          String username,
+          String password)
+          throws Exception {
     deployWebAppViaWlst(webappName, webappLocation, appLocationInPod, username, password, false);
   }
 
   /**
    * deploy webapp using adminPort or t3 channel port.
    *
-   * @param webappName           webappName
-   * @param webappLocation       webappLocation
-   * @param appLocationInPod     appLocationInPod
-   * @param username             username
-   * @param password             password
+   * @param webappName webappName
+   * @param webappLocation webappLocation
+   * @param appLocationInPod appLocationInPod
+   * @param username username
+   * @param password password
    * @param useAdminPortToDeploy useAdminPortToDeploy
    * @throws Exception exception
    */
@@ -598,13 +568,13 @@ public class Domain {
     }
 
     String[] args = {
-        appLocationInPod + "/deploywebapp.py",
-        BaseTest.getUsername(),
-        BaseTest.getPassword(),
-        t3Url,
-        webappName,
-        appLocationInPod + "/" + webappName + ".war",
-        clusterName
+      appLocationInPod + "/deploywebapp.py",
+      BaseTest.getUsername(),
+      BaseTest.getPassword(),
+      t3Url,
+      webappName,
+      appLocationInPod + "/" + webappName + ".war",
+      clusterName
     };
 
     TestUtils.callShellScriptByExecToPod(
@@ -621,14 +591,13 @@ public class Domain {
     Hashtable<String, String> env = new Hashtable<>();
     env.put(Context.INITIAL_CONTEXT_FACTORY, "weblogic.jndi.WLInitialContextFactory");
     env.put(Context.PROVIDER_URL, "t3://" + TestUtils.getHostName() + ":" + t3ChannelPort);
-    LoggerHelper.getLocal().log(Level.INFO,
-        "Creating JNDI context with URL " + env.get(Context.PROVIDER_URL));
+    logger.info("Creating JNDI context with URL " + env.get(Context.PROVIDER_URL));
     InitialContext ctx = new InitialContext(env);
     QueueConnection qcc = null;
-    LoggerHelper.getLocal().log(Level.INFO, "Getting JMS Connection Factory");
+    logger.info("Getting JMS Connection Factory");
     QueueConnectionFactory cf =
         (QueueConnectionFactory) ctx.lookup("weblogic.jms.ConnectionFactory");
-    LoggerHelper.getLocal().log(Level.INFO, "Connection Factory created successfully");
+    logger.info("Connection Factory created successfully");
     return cf;
   }
 
@@ -643,7 +612,7 @@ public class Domain {
     if (exposeAdminT3Channel) {
       callWebAppAndVerifyLoadBalancing(webappName, true);
     } else {
-      LoggerHelper.getLocal().log(Level.INFO,
+      logger.info(
           "webapp is not deployed as exposeAdminT3Channel is false, can not verify loadbalancing");
     }
   }
@@ -651,7 +620,7 @@ public class Domain {
   /**
    * call webapp and verify load balancing by checking server name in the response.
    *
-   * @param webappName        webappName
+   * @param webappName webappName
    * @param verifyLoadBalance verifyLoadBalance
    * @throws Exception exception
    */
@@ -676,15 +645,15 @@ public class Domain {
       StringBuffer curlCmdResCode = new StringBuffer(curlCmd.toString());
       curlCmdResCode.append(" --write-out %{http_code} -o /dev/null");
 
-      LoggerHelper.getLocal().log(Level.INFO, "Curl cmd with response code " + curlCmdResCode);
-      LoggerHelper.getLocal().log(Level.INFO, "Curl cmd " + curlCmd);
+      logger.info("Curl cmd with response code " + curlCmdResCode);
+      logger.info("Curl cmd " + curlCmd);
 
       // call webapp iteratively till its deployed/ready
       callWebAppAndWaitTillReady(curlCmdResCode.toString());
 
       // execute curl and look for the managed server name in response
       callWebAppAndCheckForServerNameInResponse(curlCmd.toString(), verifyLoadBalance);
-      // LoggerHelper.getLocal().log(Level.INFO, "curlCmd "+curlCmd);
+      // logger.info("curlCmd "+curlCmd);
     }
   }
 
@@ -699,10 +668,10 @@ public class Domain {
         .append("/weblogic-domains/")
         .append(domainUid)
         .append("/domain.yaml");
-    LoggerHelper.getLocal().log(Level.INFO, "Running " + cmd);
+    logger.info("Running " + cmd);
     ExecResult result = TestUtils.exec(cmd.toString());
     String outputStr = result.stdout().trim();
-    LoggerHelper.getLocal().log(Level.INFO, "Command returned " + outputStr);
+    logger.info("Command returned " + outputStr);
 
     verifyDomainCreated();
   }
@@ -721,22 +690,8 @@ public class Domain {
         .append("/domain.yaml");
     ExecResult result = TestUtils.exec(cmd.toString());
     String output = result.stdout().trim();
-    LoggerHelper.getLocal().log(Level.INFO,
-        "command to delete domain " + cmd + " \n returned " + output);
+    logger.info("command to delete domain " + cmd + " \n returned " + output);
     verifyDomainDeleted(replicas);
-
-  }
-
-  /**
-   * Delete the domain in image.
-   * @throws Exception on failure
-   */
-  public void deleteImage() throws Exception {
-    // delete domain image
-    if (domainMap.containsKey("image")) {
-      String cmd = "docker rmi -f " + domainMap.get("image");
-      TestUtils.exec(cmd, true);
-    }
   }
 
   /**
@@ -793,7 +748,7 @@ public class Domain {
    * @throws Exception exception
    */
   public void verifyDomainDeleted(int replicas) throws Exception {
-    LoggerHelper.getLocal().log(Level.INFO, "Inside verifyDomainDeleted, replicas " + replicas);
+    logger.info("Inside verifyDomainDeleted, replicas " + replicas);
     TestUtils.checkDomainDeleted(domainUid, domainNS);
     verifyServerPodsDeleted(replicas);
   }
@@ -818,7 +773,7 @@ public class Domain {
   /**
    * Get the managed server pod name for a specific index.
    *
-   * @param index the managed server index
+   * @param index  the managed server index
    * @return the managed server pod name
    */
   public String getManagedSeverPodName(int index) {
@@ -834,11 +789,6 @@ public class Domain {
     deletePvcAndCheckPvReleased("create-weblogic-sample-domain-job");
   }
 
-  /**
-   * delete PVC and check PV status.
-   * @param jobName job name
-   * @throws Exception on failure
-   */
   public void deletePvcAndCheckPvReleased(String jobName) throws Exception {
     StringBuffer cmd = new StringBuffer("kubectl get pv ");
     String pvBaseName = (String) pvMap.get("baseName");
@@ -849,8 +799,7 @@ public class Domain {
 
     ExecResult result = ExecCommand.exec(cmd.toString());
     if (result.exitValue() == 0) {
-      LoggerHelper.getLocal().log(Level.INFO,
-          "Status of PV before deleting PVC " + result.stdout());
+      logger.info("Status of PV before deleting PVC " + result.stdout());
     }
     TestUtils.deletePvc(pvBaseName + "-pvc", domainNS, domainUid, jobName);
     String reclaimPolicy = (String) domainMap.get("weblogicDomainStorageReclaimPolicy");
@@ -859,7 +808,7 @@ public class Domain {
       throw new RuntimeException(
           "ERROR: pv for " + domainUid + " still exists after the pvc is deleted, exiting!");
     } else {
-      LoggerHelper.getLocal().log(Level.INFO, "PV is released when PVC is deleted");
+      logger.info("PV is released when PVC is deleted");
     }
   }
 
@@ -874,42 +823,36 @@ public class Domain {
       // use krun.sh so that the dir check can work on shared cluster/remote k8s cluster env as well
       String cmd =
           BaseTest.getProjectRoot()
-              + "/src/integration-tests/bash/krun.sh -t 180 -m "
-              + domainMap.get("persistentVolumeClaimName")
-              + ":/pvc-"
-              + domainMap.get("domainUID")
-              + " -p " + domainMap.get("domainUID") + " -n " + domainNS + " -c \"ls -ltr /pvc-"
-              + domainMap.get("domainUID")
-              + "/domains/"
-              + domainMap.get("domainUID")
-              + "\"";
-      LoggerHelper.getLocal().log(Level.INFO,
-          "making sure the domain directory exists by running " + cmd);
-      // Looking for servers directory as sometimes krun.sh exits with non-zero
-      // even though the domain directory exists
-      ExecResult result = ExecCommand.exec(cmd);
-      if (!result.stdout().contains("servers")) {
-        throw new RuntimeException("Domain directory doesn't exist");
-      }
-      LoggerHelper.getLocal().log(Level.INFO, "Run the script to create domain");
+            + "/src/integration-tests/bash/krun.sh -m "
+            + domainMap.get("persistentVolumeClaimName")
+            + ":/pvc-"
+            + domainMap.get("domainUID")
+            + " -c \"ls -ltr /pvc-"
+            + domainMap.get("domainUID")
+            + "/domains/"
+            + domainMap.get("domainUID")
+            + "\"";
+      logger.info("making sure the domain directory exists by running " + cmd);
+      ExecResult result = TestUtils.exec(cmd);
+      // logger.info("Command result " + result.stdout() + " err =" + result.stderr());
+      logger.info("Run the script to create domain");
     } else {
       String domainStoragePath = domainMap.get("weblogicDomainStoragePath").toString();
       String domainDir = domainStoragePath + "/domains/" + domainMap.get("domainUID").toString();
-      LoggerHelper.getLocal().log(Level.INFO, "making sure the domain directory exists");
+      logger.info("making sure the domain directory exists");
       if (domainDir != null && !(new File(domainDir).exists())) {
         throw new RuntimeException(
-            "FAIL: the domain directory " + domainDir + " does not exist, exiting!");
+          "FAIL: the domain directory " + domainDir + " does not exist, exiting!");
       }
+      logger.info("Run the script to create domain");
     }
-    LoggerHelper.getLocal().log(Level.INFO, "Run the script to create domain");
     // create domain using different output dir but pv is same, it fails as the domain was already
     // created on the pv dir
     try {
       callCreateDomainScript(userProjectsDir + "2");
     } catch (RuntimeException re) {
       re.printStackTrace();
-      LoggerHelper.getLocal().log(
-          Level.INFO, "[SUCCESS] create domain job failed, this is the expected behavior");
+      logger.info("[SUCCESS] create domain job failed, this is the expected behavior");
       return;
     }
     throw new RuntimeException("FAIL: unexpected result, create domain job did not report error");
@@ -922,15 +865,14 @@ public class Domain {
    */
   public void verifyAdminConsoleViaLB() throws Exception {
     if (!loadBalancer.equals("APACHE")) {
-      LoggerHelper.getLocal().log(Level.INFO, "This check is done only for APACHE load balancer");
+      logger.info("This check is done only for APACHE load balancer");
       return;
     }
     String nodePortHost = getHostNameForCurl();
     int nodePort = getAdminSericeLbNodePort();
     String responseBodyFile =
         userProjectsDir + "/weblogic-domains/" + domainUid + "/testconsole.response.body";
-    LoggerHelper.getLocal().log(
-        Level.INFO, "nodePortHost " + nodePortHost + " nodePort " + nodePort);
+    logger.info("nodePortHost " + nodePortHost + " nodePort " + nodePort);
 
     StringBuffer cmd = new StringBuffer();
     cmd.append("curl --silent --show-error --noproxy ")
@@ -942,12 +884,12 @@ public class Domain {
         .append("/console/login/LoginForm.jsp")
         .append(" --write-out %{http_code} -o ")
         .append(responseBodyFile);
-    LoggerHelper.getLocal().log(Level.INFO, "cmd for curl " + cmd);
+    logger.info("cmd for curl " + cmd);
 
     ExecResult result = TestUtils.exec(cmd.toString());
 
     String output = result.stdout().trim();
-    LoggerHelper.getLocal().log(Level.INFO, "output " + output);
+    logger.info("output " + output);
     if (!output.equals("200")) {
       throw new RuntimeException(
           "FAILURE: accessing admin console via load balancer did not return 200 status code, got "
@@ -995,7 +937,7 @@ public class Domain {
 
     // test managed server1 pod auto restart
     String serverName = managedServerNameBase + "1";
-    TestUtils.testWlsLivenessProbe(domainUid, serverName, domainNS, userProjectsDir);
+    TestUtils.testWlsLivenessProbe(domainUid, serverName, domainNS);
   }
 
   /**
@@ -1016,7 +958,7 @@ public class Domain {
         .append(" | grep Endpoints | awk '{print $2}'");
 
     ExecResult result = TestUtils.exec(cmd.toString());
-    LoggerHelper.getLocal().log(Level.INFO, "Cluster service Endpoint " + result.stdout());
+    logger.info("Cluster service Endpoint " + result.stdout());
     return new StringTokenizer(result.stdout(), ",").countTokens();
   }
 
@@ -1030,7 +972,7 @@ public class Domain {
         .append(adminServerLbNodePortService)
         .append("\")].spec.ports[0].nodePort}'");
 
-    LoggerHelper.getLocal().log(Level.INFO, "Cmd to get the admins service node port " + cmd);
+    logger.info("Cmd to get the admins service node port " + cmd);
 
     ExecResult result = TestUtils.exec(cmd.toString());
     return new Integer(result.stdout().trim()).intValue();
@@ -1041,9 +983,9 @@ public class Domain {
    * PersistentVolume.
    *
    * @throws Exception If the file create-pv-pvc-inputs.yaml does not exist, is a directory rather
-   *                   than a regular file, or for some other reason cannot be opened for reading. or if an I/O
-   *                   error occurs or any errors while creating PV dir or generating PV/PVC input file or any
-   *                   errors while executing sample create-pv-pvc.sh script
+   *     than a regular file, or for some other reason cannot be opened for reading. or if an I/O
+   *     error occurs or any errors while creating PV dir or generating PV/PVC input file or any
+   *     errors while executing sample create-pv-pvc.sh script
    */
   protected void createPv() throws Exception {
 
@@ -1051,19 +993,18 @@ public class Domain {
     InputStream pvis =
         new FileInputStream(
             new File(
-                resultsDir
+                BaseTest.getResultDir()
                     + "/samples/scripts/create-weblogic-domain-pv-pvc/create-pv-pvc-inputs.yaml"));
     pvMap = yaml.load(pvis);
     pvis.close();
-
-    LoggerHelper.getLocal().log(Level.INFO, "pvSharing for this domain is: " + pvSharing);
+    
+    logger.info("pvSharing for this domain is: " + pvSharing);
     if (!pvSharing) {
       pvMap.put("domainUID", domainUid);
     } else {
       pvMap.put("baseName", "weblogic-sharing");
     }
-    LoggerHelper.getLocal().log(Level.INFO,
-        "baseName of PVPVC for this domain is: " + (String) pvMap.get("baseName"));
+    logger.info("baseName of PVPVC for this domain is: " + (String) pvMap.get("baseName"));
 
     // Now there is only one pvSharing test case and we just use parameter "baseName"+"-pvc" as PVC
     if ((domainUid != null) && !pvSharing) {
@@ -1082,8 +1023,6 @@ public class Domain {
     }
     pvMap.put("namespace", domainNS);
     pvMap.put("weblogicDomainStorageNFSServer", TestUtils.getHostName());
-    pvMap.put("userProjectsDir", userProjectsDir);
-    pvMap.put("pvRoot", pvRoot);
 
     if (BaseTest.OPENSHIFT) {
       pvMap.put("weblogicDomainStorageType", "NFS");
@@ -1092,31 +1031,30 @@ public class Domain {
     // set pv path
     domainMap.put(
         "weblogicDomainStoragePath",
-        pvRoot + "/acceptance_test_pv/persistentVolume-" + domainUid);
+        BaseTest.getPvRoot() + "/acceptance_test_pv/persistentVolume-" + domainUid);
 
     pvMap.put(
         "weblogicDomainStoragePath",
-        pvRoot + "/acceptance_test_pv/persistentVolume-" + domainUid);
+        BaseTest.getPvRoot() + "/acceptance_test_pv/persistentVolume-" + domainUid);
 
     pvMap.values().removeIf(Objects::isNull);
 
     // k8s job mounts PVROOT /scratch/<usr>/wl_k8s_test_results to /scratch, create PV/PVC
-    new PersistentVolume(pvRoot + "/acceptance_test_pv/persistentVolume-" + domainUid, pvMap);
+    new PersistentVolume(BaseTest.getPvRoot() + "/acceptance_test_pv/persistentVolume-" + domainUid, pvMap);
 
     String cmd =
         BaseTest.getProjectRoot()
             + "/src/integration-tests/bash/krun.sh -m "
-            // + pvRoot
-            + "/scratch:/scratch -n " + domainNS + " -c \"ls -ltr /scratch "
-            + pvRoot
+            // + BaseTest.getPvRoot()
+            + "/scratch:/scratch -c \"ls -ltr /scratch "
+            + BaseTest.getPvRoot()
             + " "
-            + pvRoot
+            + BaseTest.getPvRoot()
             + "/acceptance_test_pv"
             + "\"";
-    LoggerHelper.getLocal().log(Level.INFO, "Check PVROOT by running " + cmd);
+    logger.info("Check PVROOT by running " + cmd);
     ExecResult result = ExecCommand.exec(cmd);
-    LoggerHelper.getLocal().log(
-        Level.INFO, "ls -ltr output " + result.stdout() + " err " + result.stderr());
+    logger.info("ls -ltr output " + result.stdout() + " err " + result.stderr());
   }
 
   /**
@@ -1128,25 +1066,24 @@ public class Domain {
    */
   public void verifyDomainServerPodRestart(String oldPropertyString, String newPropertyString)
       throws Exception {
-    LoggerHelper.getLocal().log(Level.INFO, "Inside testDomainServerPodRestart");
+    logger.info("Inside testDomainServerPodRestart");
     String content =
         new String(
             Files.readAllBytes(
                 Paths.get(
-                    userProjectsDir
+                    BaseTest.getUserProjectsDir()
                         + "/weblogic-domains/"
                         + domainUid
                         + "/domain.yaml")));
     boolean result = content.indexOf(newPropertyString) >= 0;
-    LoggerHelper.getLocal().log(Level.INFO,
-        "The search result for " + newPropertyString + " is: " + result);
+    logger.info("The search result for " + newPropertyString + " is: " + result);
     if (!result) {
       TestUtils.createNewYamlFile(
-          userProjectsDir + "/weblogic-domains/" + domainUid + "/domain.yaml",
-          userProjectsDir + "/weblogic-domains/" + domainUid + "/domain_new.yaml",
+          BaseTest.getUserProjectsDir() + "/weblogic-domains/" + domainUid + "/domain.yaml",
+          BaseTest.getUserProjectsDir() + "/weblogic-domains/" + domainUid + "/domain_new.yaml",
           oldPropertyString,
           newPropertyString);
-      LoggerHelper.getLocal().log(Level.INFO,
+      logger.info(
           "Done - generate new domain.yaml for "
               + domainUid
               + " oldProperty: "
@@ -1159,11 +1096,11 @@ public class Domain {
       command
           .append("kubectl apply  -f ")
           .append(
-              userProjectsDir
+              BaseTest.getUserProjectsDir()
                   + "/weblogic-domains/"
                   + domainUid
                   + "/domain_new.yaml");
-      LoggerHelper.getLocal().log(Level.INFO, "kubectl execut with command: " + command.toString());
+      logger.info("kubectl execut with command: " + command.toString());
       TestUtils.exec(command.toString());
 
       // verify the servers in the domain are being restarted in a sequence
@@ -1172,52 +1109,45 @@ public class Domain {
 
       // make domain.yaml include the new changed property
       TestUtils.copyFile(
-          userProjectsDir + "/weblogic-domains/" + domainUid + "/domain_new.yaml",
-          userProjectsDir + "/weblogic-domains/" + domainUid + "/domain.yaml");
+          BaseTest.getUserProjectsDir() + "/weblogic-domains/" + domainUid + "/domain_new.yaml",
+          BaseTest.getUserProjectsDir() + "/weblogic-domains/" + domainUid + "/domain.yaml");
     }
-    LoggerHelper.getLocal().log(Level.INFO, "Done - testDomainServerPodRestart");
+    logger.info("Done - testDomainServerPodRestart");
   }
-   
+
   /**
    * Verify domain server pods get restarted after the property change by kubectl apply -f new
    * domain yaml file with added/changed property.
    *
    * @param fileNameWithChangedProperty - the fragment of domain yaml file with new added property
-   *                                    change
+   *     change
    * @throws Exception - IOException or errors occurred if the tested server is not restarted
    */
   public void verifyDomainServerPodRestart(String fileNameWithChangedProperty) throws Exception {
-    LoggerHelper.getLocal().log(Level.INFO,
-        "Inside testDomainServerPodRestart domainYamlWithChangedProperty");
+    logger.info("Inside testDomainServerPodRestart domainYamlWithChangedProperty");
 
-    final String newDomainYamlFile =
-        userProjectsDir + "/weblogic-domains/" + domainUid + "/domain_new.yaml";
-    final String domainYamlFile =
-        userProjectsDir + "/weblogic-domains/" + domainUid + "/domain.yaml";
-    final String changedDomainYamlFile =
-        userProjectsDir + "/weblogic-domains/" + domainUid + "/domain_change.yaml";
-    final String fileWithChangedProperty =
+    String newDomainYamlFile =
+        BaseTest.getUserProjectsDir() + "/weblogic-domains/" + domainUid + "/domain_new.yaml";
+    String domainYamlFile =
+        BaseTest.getUserProjectsDir() + "/weblogic-domains/" + domainUid + "/domain.yaml";
+    String fileWithChangedProperty =
         BaseTest.getProjectRoot()
             + "/integration-tests/src/test/resources/"
             + fileNameWithChangedProperty;
 
-    // copy the original domain.yaml to domain_change.yaml
-    TestUtils.copyFile(domainYamlFile, changedDomainYamlFile);
+    // copy the original domain.yaml to domain_new.yaml
+    TestUtils.copyFile(domainYamlFile, newDomainYamlFile);
 
-    // append the file with changed property to the end of domain_change.yaml
+    // append the file with changed property to the end of domain_new.yaml
     Files.write(
-        Paths.get(changedDomainYamlFile),
+        Paths.get(newDomainYamlFile),
         Files.readAllBytes(Paths.get(fileWithChangedProperty)),
         StandardOpenOption.APPEND);
-    
-    String oldPvc = "domainpodsrestart-weblogic-sample-pvc";
-    String newPvc = domainUid + "-" + pvMap.get("baseName") + "-pvc";
-    LoggerHelper.getLocal().log(Level.INFO, "newPvc in verifyDomainServerPodRestart: " + newPvc);
-    modifyPropertyInYaml(oldPvc, newPvc, changedDomainYamlFile, newDomainYamlFile);
+
     // kubectl apply the new constructed domain_new.yaml
     StringBuffer command = new StringBuffer();
     command.append("kubectl apply  -f ").append(newDomainYamlFile);
-    LoggerHelper.getLocal().log(Level.INFO, "kubectl execut with command: " + command.toString());
+    logger.info("kubectl execut with command: " + command.toString());
     TestUtils.exec(command.toString());
 
     // verify the servers in the domain are being restarted in a sequence
@@ -1227,59 +1157,21 @@ public class Domain {
     // make domain.yaml include the new changed property
     TestUtils.copyFile(newDomainYamlFile, domainYamlFile);
 
-    LoggerHelper.getLocal().log(
-        Level.INFO, "Done - testDomainServerPodRestart with domainYamlWithChangedProperty");
+    logger.info("Done - testDomainServerPodRestart with domainYamlWithChangedProperty");
   }
-   
-  /**
-   * Modify the property in the domain yaml file.
-   *
-   * @param oldString - the old property value
-   * @param newString - the new property value
-   * @param oldFileName - the file name that has the oldString 
-   * @param newFileName - the file name that has the newString changed from the old one
-   * @throws Exception - IOException or errors occurred during the call
-   */
-  public void modifyPropertyInYaml(String oldString, String newString, String oldFileName, String newFileName)
-      throws Exception {
-    LoggerHelper.getLocal().log(Level.INFO, "modifyDomainPvcInYaml");
-    String content =
-        new String(
-        Files.readAllBytes(
-            Paths.get(oldFileName)));
-    boolean result = content.indexOf(oldString) >= 0;
-    LoggerHelper.getLocal().log(Level.INFO,
-        "The search result for " + oldString + " is: " + result);
-    if (result) {
-      TestUtils.createNewYamlFile(
-          oldFileName,
-          newFileName,
-          oldString,
-          newString);
-      LoggerHelper.getLocal().log(Level.INFO,
-          "Done - generate new domain.yaml for "
-              + domainUid
-              + " oldPVC: "
-              + oldString
-              + " newPVC: "
-              + newString);
 
-    }
-    LoggerHelper.getLocal().log(Level.INFO, "Done - modifyPropertyInYaml");
-  }
-  
   /**
    * Get runtime server yaml file and verify the changed property is in that file.
    *
    * @param changedProperty - the changed/added property
-   * @param serverName      - server name that is being tested
+   * @param serverName - server name that is being tested
    * @throws Exception - test FAILURE Exception if the changed property is not found in the server
-   *                   yaml file
+   *     yaml file
    */
   public void findServerPropertyChange(String changedProperty, String serverName) throws Exception {
-    LoggerHelper.getLocal().log(Level.INFO, "Inside findServerPropertyChange");
+    logger.info("Inside findServerPropertyChange");
     // get runtime server pod yaml file
-    String outDir = userProjectsDir + "/weblogic-domains/" + domainUid + "/";
+    String outDir = BaseTest.getUserProjectsDir() + "/weblogic-domains/" + domainUid + "/";
     StringBuffer command = new StringBuffer();
     command
         .append("kubectl get po/")
@@ -1294,18 +1186,18 @@ public class Domain {
                 + "\""
                 + changedProperty
                 + "\"");
-    LoggerHelper.getLocal().log(Level.INFO, "kubectl execut with command: " + command.toString());
+    logger.info("kubectl execut with command: " + command.toString());
     TestUtils.exec(command.toString());
 
     String result = ((TestUtils.exec(command.toString())).stdout());
-    LoggerHelper.getLocal().log(Level.INFO,
+    logger.info(
         "in the method findServerPropertyChange, " + command.toString() + " return " + result);
     if (!result.contains(changedProperty)) {
       throw new Exception(
           "FAILURE: didn't find the property: " + changedProperty + " for the server" + serverName);
     }
 
-    LoggerHelper.getLocal().log(Level.INFO, "Done - findServerPropertyChange");
+    logger.info("Done - findServerPropertyChange");
   }
 
   /**
@@ -1314,12 +1206,10 @@ public class Domain {
    * @throws Exception exception
    */
   public void verifyAdminServerRestarted() throws Exception {
-    LoggerHelper.getLocal().log(Level.INFO,
-        "Checking if admin pod(" + domainUid + "-" + adminServerName + ") is Terminating");
+    logger.info("Checking if admin pod(" + domainUid + "-" + adminServerName + ") is Terminating");
     TestUtils.checkPodTerminating(domainUid + "-" + adminServerName, domainNS);
 
-    LoggerHelper.getLocal().log(
-        Level.INFO, "Checking if admin pod(" + domainUid + "-" + adminServerName + ") is Ready");
+    logger.info("Checking if admin pod(" + domainUid + "-" + adminServerName + ") is Ready");
     TestUtils.checkPodCreated(domainUid + "-" + adminServerName, domainNS);
     TestUtils.checkPodReady(domainUid + "-" + adminServerName, domainNS);
   }
@@ -1340,8 +1230,9 @@ public class Domain {
         podNameSet.add(managedServerNameBase + i);
       }
 
-      /* Loop until all the servers have recycled.  Wait 5 minutes max for a managed server
+      /* Loop until all the servers have recycled.  Wait 5 minutes max for a managed server 
       to be terminating.*/
+      
       final int maxTerminateLoop = 300;
       int terminateLoopCount = 0;
       while (podNameSet.size() > 0) {
@@ -1352,16 +1243,14 @@ public class Domain {
             terminateLoopCount = 0;
 
             // Server is terminating, wait until server running then remove it from the list
-            LoggerHelper.getLocal().log(Level.INFO, "Managed managed server pod " + podName
+            logger.info("Managed managed server pod " + podName
                 + "  is terminating, waiting until it is re-created and running.");
             TestUtils.checkPodCreated(domainUid + "-" + podName, domainNS);
 
-            LoggerHelper.getLocal().log(
-                Level.INFO, "Waiting until managed server pod " + podName + "  is ready");
+            logger.info("Waiting until managed server pod " + podName + "  is ready");
             TestUtils.checkPodReady(domainUid + "-" + podName, domainNS);
 
-            LoggerHelper.getLocal().log(
-                Level.INFO, "Managed server pod " + podName + " has been recycled");
+            logger.info("Managed server pod " + podName + " has been recycled");
             iter.remove();
           }
         }
@@ -1372,8 +1261,7 @@ public class Domain {
           if (++terminateLoopCount > maxTerminateLoop) {
             throw new RuntimeException("Timeout waiting for any managed server to terminate");
           }
-          LoggerHelper.getLocal().log(
-              Level.INFO, "Waiting for any managed server pod to be terminating...");
+          logger.info("Waiting for any managed server pod to be terminating...");
           Thread.sleep(1000);
         }
       }
@@ -1416,13 +1304,13 @@ public class Domain {
     if (ocrserver == null) {
       ocrserver = "container-registry.oracle.com";
     }
-
+    
     TestUtils.createDockerRegistrySecret(
         secret,
         ocrserver,
         System.getenv("OCR_USERNAME"),
         System.getenv("OCR_PASSWORD"),
-        System.getenv("OCR_USERNAME") + "@oracle.com",
+        null,
         domainNS);
   }
 
@@ -1445,9 +1333,9 @@ public class Domain {
    * configOverrides to domain.yaml.
    *
    * @param outputDir directory for the generated Kubernetes YAML files for the domain when
-   *                  create-domain.sh is called
+   *     create-domain.sh is called
    * @throws Exception if git clone fails or if createDomainPyScript can not be copied or if the
-   *                   cluster topology file can not be copied or if create-domain.sh fails
+   *     cluster topology file can not be copied or if create-domain.sh fails
    */
   protected void callCreateDomainScript(String outputDir) throws Exception {
 
@@ -1470,9 +1358,9 @@ public class Domain {
     changeClusterTypeInCreateDomainJobTemplate();
 
     // Get the map of any additional environment vars, or null
-    Map<String, String> additionalEnvMap = (Map<String, String>) domainMap.get("additionalEnvMap");
+    Map<String, String> additionalEnvMap = (Map<String, String>)domainMap.get("additionalEnvMap");;
 
-    LoggerHelper.getLocal().log(Level.INFO, "Running " + createDomainScriptCmd);
+    logger.info("Running " + createDomainScriptCmd);
     ExecResult result = ExecCommand.exec(createDomainScriptCmd, true, additionalEnvMap);
     if (result.exitValue() != 0) {
       throw new RuntimeException(
@@ -1484,11 +1372,12 @@ public class Domain {
               + result.stderr());
     }
     String outputStr = result.stdout().trim();
-    LoggerHelper.getLocal().log(Level.INFO, "Command returned " + outputStr);
-  
+    logger.info("Command returned " + outputStr);
+
     // for remote k8s cluster and domain in image case, push the domain image to OCIR
     if (domainMap.containsKey("domainHomeImageBase") && BaseTest.SHARED_CLUSTER) {
-      String image = (String)domainMap.get("image");
+      String image =
+          System.getenv("REPO_REGISTRY") + "/weblogick8s/domain-home-in-image:" + imageTag;
       TestUtils.loginAndPushImageToOcir(image);
 
       // create ocir registry secret in the same ns as domain which is used while pulling the domain
@@ -1527,21 +1416,20 @@ public class Domain {
           "loadBalancerWebPort",
           domainMap.getOrDefault("loadBalancerWebPort", new Integer(loadBalancerWebPort)));
     }
-    if (!ingressPerDomain) {
+    if (!INGRESSPERDOMAIN) {
       lbMap.put("ingressPerDomain", new Boolean("false"));
-      LoggerHelper.getLocal().log(Level.INFO, "For this domain, INGRESSPERDOMAIN is set to false");
+      logger.info("For this domain, INGRESSPERDOMAIN is set to false");
     } else {
       lbMap.put(
           "ingressPerDomain",
           domainMap.getOrDefault("ingressPerDomain", new Boolean(ingressPerDomain)));
     }
     lbMap.put("clusterName", domainMap.get("clusterName"));
-    lbMap.put("userProjectsDir", userProjectsDir);
 
     loadBalancer = (String) lbMap.get("loadBalancer");
     loadBalancerWebPort = ((Integer) lbMap.get("loadBalancerWebPort")).intValue();
     ingressPerDomain = ((Boolean) lbMap.get("ingressPerDomain")).booleanValue();
-    LoggerHelper.getLocal().log(Level.INFO,
+    logger.info(
         "For this domain loadBalancer is: "
             + loadBalancer
             + " ingressPerDomain is: "
@@ -1571,10 +1459,10 @@ public class Domain {
 
   private void callWebAppAndWaitTillReady(String curlCmd) throws Exception {
     for (int i = 0; i < maxIterations; i++) {
-      ExecResult result = ExecCommand.exec(curlCmd);
+      ExecResult result = TestUtils.exec(curlCmd);
       String responseCode = result.stdout().trim();
-      if (result.exitValue() != 0 || !responseCode.equals("200")) {
-        LoggerHelper.getLocal().log(Level.INFO,
+      if (!responseCode.equals("200")) {
+        logger.info(
             "callWebApp did not return 200 status code, got "
                 + responseCode
                 + ", iteration "
@@ -1590,9 +1478,8 @@ public class Domain {
         } catch (InterruptedException ignore) {
           // no-op
         }
-      } else if (responseCode.equals("200")) {
-        LoggerHelper.getLocal().log(Level.INFO,
-            "callWebApp returned 200 response code, iteration " + i);
+      } else {
+        logger.info("callWebApp returned 200 response code, iteration " + i);
         break;
       }
     }
@@ -1610,13 +1497,12 @@ public class Domain {
     for (int i = 1; i <= TestUtils.getClusterReplicas(domainUid, clusterName, domainNS); i++) {
       managedServers.put(domainUid + "-" + managedServerNameBase + i, new Boolean(false));
     }
-    LoggerHelper.getLocal().log(Level.INFO,
-        "Calling webapp " + maxIterations + " times " + curlCmd);
+    logger.info("Calling webapp " + maxIterations + " times " + curlCmd);
     // number of times to call webapp
 
     for (int i = 0; i < maxIterations; i++) {
       ExecResult result = ExecCommand.exec(curlCmd.toString());
-      LoggerHelper.getLocal().log(Level.INFO, "webapp invoked successfully for curlCmd:" + curlCmd);
+      logger.info("webapp invoked successfully for curlCmd:" + curlCmd);
       if (verifyLoadBalancing) {
         String response = result.stdout().trim();
         for (String key : managedServers.keySet()) {
@@ -1628,13 +1514,12 @@ public class Domain {
       }
     }
 
-    LoggerHelper.getLocal().log(Level.INFO, "ManagedServers " + managedServers);
+    logger.info("ManagedServers " + managedServers);
 
     // error if any managedserver value is false
     if (verifyLoadBalancing) {
       for (Map.Entry<String, Boolean> entry : managedServers.entrySet()) {
-        LoggerHelper.getLocal().log(Level.INFO,
-            "Load balancer will try to reach server " + entry.getKey());
+        logger.info("Load balancer will try to reach server " + entry.getKey());
         if (!entry.getValue().booleanValue()) {
           // print service and pods info for debugging
           TestUtils.describeService(domainNS, domainUid + "-cluster-" + clusterName);
@@ -1652,41 +1537,36 @@ public class Domain {
    *
    * @param inputDomainMap domain, LB, PV and custom input attributes for the domain
    * @throws Exception if removing the results dir fails or if create-domain-inputs.yaml cannot be
-   *                   accessed to read or if creating config map or secret fails for configoverrides
+   *     accessed to read or if creating config map or secret fails for configoverrides
    */
   protected void initialize(Map<String, Object> inputDomainMap) throws Exception {
     imageTag = BaseTest.getWeblogicImageTag();
     imageName = BaseTest.getWeblogicImageName();
     domainMap = inputDomainMap;
-    userProjectsDir = (String) domainMap.get("userProjectsDir");
-    resultsDir = (String) domainMap.get("resultDir");
-    pvRoot = (String) domainMap.get("pvRoot");
-    projectRoot = BaseTest.getProjectRoot();
+    this.userProjectsDir = BaseTest.getUserProjectsDir();
+    this.projectRoot = BaseTest.getProjectRoot();
 
     // copy samples to RESULT_DIR
-    if (Files.exists(Paths.get(resultsDir + "/samples"))) {
-      TestUtils.exec("rm -rf " + resultsDir + "/samples");
-    }
     if (domainMap.containsKey("projectRoot")) {
       TestUtils.exec(
           "cp -rf "
               + domainMap.get("projectRoot")
               + "/kubernetes/samples "
-              + resultsDir,
+              + BaseTest.getResultDir(),
           true);
     } else {
       TestUtils.exec(
-          "cp -rf " + BaseTest.getProjectRoot() + "/kubernetes/samples " + resultsDir,
+          "cp -rf " + BaseTest.getProjectRoot() + "/kubernetes/samples " + BaseTest.getResultDir(),
           true);
     }
 
     this.voyager =
         (System.getenv("LB_TYPE") != null && System.getenv("LB_TYPE").equalsIgnoreCase("VOYAGER"))
             || (inputDomainMap.containsKey("loadBalancer")
-            && ((String) inputDomainMap.get("loadBalancer")).equalsIgnoreCase("VOYAGER"));
+                && ((String) inputDomainMap.get("loadBalancer")).equalsIgnoreCase("VOYAGER"));
 
     if (System.getenv("INGRESSPERDOMAIN") != null) {
-      ingressPerDomain = new Boolean(System.getenv("INGRESSPERDOMAIN")).booleanValue();
+      INGRESSPERDOMAIN = new Boolean(System.getenv("INGRESSPERDOMAIN")).booleanValue();
     }
 
     domainMap.put("domainName", domainMap.get("domainUID"));
@@ -1699,16 +1579,14 @@ public class Domain {
           "/samples/scripts/create-weblogic-domain/domain-home-in-image/create-domain-inputs.yaml";
     } else if (domainMap.containsKey("rcuDatabaseURL")) {
       sampleDomainInputsFile =
-          "/samples/scripts/create-fmw-infrastructure-domain/"
-              + "domain-home-on-pv/create-domain-inputs.yaml";
+          "/samples/scripts/create-fmw-infrastructure-domain/domain-home-on-pv/create-domain-inputs.yaml";
     }
-    LoggerHelper.getLocal().log(
-        Level.INFO, "For this domain sampleDomainInputsFile is: " + sampleDomainInputsFile);
+    logger.info("For this domain sampleDomainInputsFile is: " + sampleDomainInputsFile);
     Yaml dyaml = new Yaml();
     InputStream sampleDomainInputStream =
-        new FileInputStream(new File(resultsDir + sampleDomainInputsFile));
-    LoggerHelper.getLocal().log(Level.INFO,
-        "loading domain inputs template file " + resultsDir + sampleDomainInputsFile);
+        new FileInputStream(new File(BaseTest.getResultDir() + sampleDomainInputsFile));
+    logger.info(
+        "loading domain inputs template file " + BaseTest.getResultDir() + sampleDomainInputsFile);
     Map<String, Object> sampleDomainMap = dyaml.load(sampleDomainInputStream);
     sampleDomainInputStream.close();
 
@@ -1733,7 +1611,7 @@ public class Domain {
     if (domainMap.containsKey("pvSharing")) {
       pvSharing = ((Boolean) domainMap.get("pvSharing")).booleanValue();
     }
-    LoggerHelper.getLocal().log(Level.INFO, "pvSharing for this domain is: " + pvSharing);
+    logger.info("pvSharing for this domain is: " + pvSharing);
 
     if (exposeAdminT3Channel) {
       domainMap.put("t3PublicAddress", TestUtils.getHostName());
@@ -1741,17 +1619,15 @@ public class Domain {
 
     if (System.getenv("IMAGE_NAME_WEBLOGIC") != null) {
       imageName = System.getenv("IMAGE_NAME_WEBLOGIC");
-      LoggerHelper.getLocal().log(Level.INFO, "IMAGE_NAME_WEBLOGIC " + imageName);
+      logger.info("IMAGE_NAME_WEBLOGIC " + imageName);
     }
 
     if (System.getenv("IMAGE_TAG_WEBLOGIC") != null) {
       imageTag = System.getenv("IMAGE_TAG_WEBLOGIC");
-      LoggerHelper.getLocal().log(Level.INFO, "IMAGE_TAG_WEBLOGIC " + imageTag);
+      logger.info("IMAGE_TAG_WEBLOGIC " + imageTag);
     }
     domainMap.put("logHome", "/shared/logs/" + domainUid);
-    if (domainMap.containsKey("weblogicImageTagWIT")) {
-      domainMap.put("image", domainMap.get("weblogicImageTagWIT"));
-    } else if (!domainMap.containsKey("domainHomeImageBase")) {
+    if (!domainMap.containsKey("domainHomeImageBase")) {
       domainMap.put("domainHome", "/shared/domains/" + domainUid);
       domainMap.put("image", imageName + ":" + imageTag);
       if (System.getenv("IMAGE_PULL_SECRET_WEBLOGIC") != null) {
@@ -1765,7 +1641,7 @@ public class Domain {
       if (BaseTest.SHARED_CLUSTER) {
         domainMap.put(
             "image",
-            System.getenv("REPO_REGISTRY") + "/weblogick8s/" + (String)domainMap.get("image"));
+            System.getenv("REPO_REGISTRY") + "/weblogick8s/domain-home-in-image:" + imageTag);
         domainMap.put("imagePullSecretName", "ocir-domain");
         domainMap.put("imagePullPolicy", "Always");
       }
@@ -1773,16 +1649,16 @@ public class Domain {
 
     if (domainMap.containsKey("domainHomeImageBuildPath")) {
       domainHomeImageBuildPath =
-          resultsDir
+          BaseTest.getResultDir()
               + "/"
               + ((String) domainMap.get("domainHomeImageBuildPath")).trim();
       domainMap.put(
           "domainHomeImageBuildPath",
-          resultsDir
+          BaseTest.getResultDir()
               + "/"
               + ((String) domainMap.get("domainHomeImageBuildPath")).trim());
-
-      domainMap.put("domainHomeImageBase",
+      
+      domainMap.put("domainHomeImageBase", 
           BaseTest.getWeblogicImageName() + ":" + BaseTest.getWeblogicImageTag());
     }
     // remove null values if any attributes
@@ -1791,7 +1667,7 @@ public class Domain {
     // create config map and secret for custom sit config
     createConfigMapAndSecretForSitConfig();
     
-    if (!domainMap.containsKey("domainHomeImageBase")) {
+    if (BaseTest.SHARED_CLUSTER && !domainMap.containsKey("domainHomeImageBase")) {
       createDockerRegistrySecret();
     }
   }
@@ -1800,14 +1676,14 @@ public class Domain {
     if (inputDomainMap.containsKey("customDomainTemplate")) {
       Files.copy(
           Paths.get((String) inputDomainMap.get("customDomainTemplate")),
-          Paths.get(resultsDir + "/samples/scripts/common/domain-template.yaml"),
+          Paths.get(BaseTest.getResultDir() + "/samples/scripts/common/domain-template.yaml"),
           StandardCopyOption.REPLACE_EXISTING);
     }
-    LoggerHelper.getLocal().log(Level.FINEST, "Domain Template");
+    logger.log(Level.FINEST, "Domain Template");
     byte[] readAllBytes =
         Files.readAllBytes(
-            Paths.get(resultsDir + "/samples/scripts/common/domain-template.yaml"));
-    LoggerHelper.getLocal().log(Level.FINEST, new String(readAllBytes, StandardCharsets.UTF_8));
+            Paths.get(BaseTest.getResultDir() + "/samples/scripts/common/domain-template.yaml"));
+    logger.log(Level.FINEST, new String(readAllBytes, StandardCharsets.UTF_8));
   }
 
   private String getNodeHost() throws Exception {
@@ -1822,7 +1698,7 @@ public class Domain {
 
     ExecResult result = TestUtils.exec(cmd);
     String nodePortHost = result.stdout();
-    // LoggerHelper.getLocal().log(Level.INFO, "nodePortHost "+nodePortHost);
+    // logger.info("nodePortHost "+nodePortHost);
     if (nodePortHost.contains(":") && nodePortHost.contains("/")) {
       return nodePortHost
           .substring(nodePortHost.indexOf(":") + 1, nodePortHost.indexOf("/"))
@@ -1857,12 +1733,12 @@ public class Domain {
    * image.
    *
    * @throws Exception if could not run the command successfully to clone of docker-images sample
-   *                   from github
+   *     from github
    */
-  private synchronized void gitCloneDockerImagesSample() throws Exception {
+  private void gitCloneDockerImagesSample() throws Exception {
     if (!domainHomeImageBuildPath.isEmpty()) {
       StringBuffer removeAndClone = new StringBuffer();
-      LoggerHelper.getLocal().log(Level.INFO,
+      logger.info(
           "Checking if directory "
               + domainHomeImageBuildPath
               + " exists "
@@ -1870,20 +1746,15 @@ public class Domain {
       if (new File(domainHomeImageBuildPath).exists()) {
         removeAndClone
             .append("rm -rf ")
-            .append(resultsDir)
+            .append(BaseTest.getResultDir())
             .append("/docker-images && ");
       }
-      String dockerImagesUrl = System.getenv("DOCKER_IMAGES_URL") != null
-                ? System.getenv("DOCKER_IMAGES_URL")
-                : "https://github.com/oracle/docker-images.git";
       // git clone docker-images project
       removeAndClone
-          .append(" git clone ")
-          .append(dockerImagesUrl)
-          .append(" ")
-          .append(resultsDir)
+          .append(" git clone https://github.com/oracle/docker-images.git ")
+          .append(BaseTest.getResultDir())
           .append("/docker-images");
-      LoggerHelper.getLocal().log(Level.INFO, "Executing cmd " + removeAndClone);
+      logger.info("Executing cmd " + removeAndClone);
       TestUtils.exec(removeAndClone.toString());
     }
   }
@@ -1893,12 +1764,12 @@ public class Domain {
    * create the domain crd by calling kubectl create on the generated domain.yaml.
    *
    * @throws Exception if any error occurs writing to the file or if could not run kubectl create
-   *                   command
+   *     command
    */
   private void appendToDomainYamlAndCreate() throws Exception {
 
     String domainYaml =
-        userProjectsDir + "/weblogic-domains/" + domainUid + "/domain.yaml";
+        BaseTest.getUserProjectsDir() + "/weblogic-domains/" + domainUid + "/domain.yaml";
 
     if (domainMap.containsKey("configOverrides")) {
       String contentToAppend =
@@ -1917,14 +1788,9 @@ public class Domain {
 
     String command = "kubectl create -f " + domainYaml;
     ExecResult result = TestUtils.exec(command);
-    LoggerHelper.getLocal().log(Level.INFO, "Command returned " + result.stdout().trim());
+    logger.info("Command returned " + result.stdout().trim());
   }
 
-  /**
-   * hostname for curl.
-   * @return hostname
-   * @throws Exception on failure
-   */
   public String getHostNameForCurl() throws Exception {
     if (System.getenv("K8S_NODEPORT_HOST") != null) {
       return System.getenv("K8S_NODEPORT_HOST");
@@ -1973,9 +1839,9 @@ public class Domain {
             new File(BaseTest.getProjectRoot() + "/" + domainMap.get("createDomainPyScript"))
                 .toPath(),
             new File(
-                resultsDir
-                    + "/samples/scripts/create-fmw-infrastructure-domain/domain-home-on-pv/"
-                    + "common/createFMWDomain.py")
+                    BaseTest.getResultDir()
+                        + "/samples/scripts/create-fmw-infrastructure-domain/domain-home-on-pv/"
+                        + "common/createFMWDomain.py")
                 .toPath(),
             StandardCopyOption.REPLACE_EXISTING);
       } else {
@@ -1984,8 +1850,8 @@ public class Domain {
             new File(BaseTest.getProjectRoot() + "/" + domainMap.get("createDomainPyScript"))
                 .toPath(),
             new File(
-                resultsDir
-                    + "/samples/scripts/create-weblogic-domain/domain-home-on-pv/wlst/create-domain.py")
+                    BaseTest.getResultDir()
+                        + "/samples/scripts/create-weblogic-domain/domain-home-on-pv/wlst/create-domain.py")
                 .toPath(),
             StandardCopyOption.REPLACE_EXISTING);
       }
@@ -1996,14 +1862,14 @@ public class Domain {
    * Prepare the command to call create-domain.sh based on the domain type.
    *
    * @param outputDir directory for the generated Kubernetes YAML files for the domain when
-   *                  create-domain.sh is called
+   *     create-domain.sh is called
    * @return the command
    */
   private String prepareCmdToCallCreateDomainScript(String outputDir) {
 
     StringBuffer createDomainScriptCmd = new StringBuffer("export WDT_VERSION=");
     createDomainScriptCmd.append(BaseTest.WDT_VERSION).append(" && ")
-        .append(resultsDir);
+            .append(BaseTest.getResultDir());
     // call different create-domain.sh based on the domain type
     if (domainMap.containsKey("domainHomeImageBase")) {
       createDomainScriptCmd
@@ -2015,8 +1881,7 @@ public class Domain {
           .append(" -k -i ");
     } else if (domainMap.containsKey("rcuDatabaseURL")) {
       createDomainScriptCmd.append(
-          "/samples/scripts/create-fmw-infrastructure-domain/"
-              + "domain-home-on-pv/create-domain.sh -v -i ");
+          "/samples/scripts/create-fmw-infrastructure-domain/domain-home-on-pv/create-domain.sh -v -i ");
     } else {
       createDomainScriptCmd.append(
           "/samples/scripts/create-weblogic-domain/domain-home-on-pv/create-domain.sh -v -i ");
@@ -2038,7 +1903,7 @@ public class Domain {
    * configured cluster topology if clusterType is CONFIGURED.
    *
    * @throws Exception when errors occured during reading/writing the file or executing the command
-   *                   to change the value in create-domain-job-template.yaml
+   *     to change the value in create-domain-job-template.yaml
    */
   private void changeClusterTypeInCreateDomainJobTemplate() throws Exception {
 
@@ -2049,31 +1914,25 @@ public class Domain {
     if (domainMap.containsKey("customWdtTemplate")) {
       TestUtils.copyFile(
           (String) domainMap.get("customWdtTemplate"),
-          resultsDir
-              + "/docker-images/OracleWebLogic/samples/"
-              + "12213-domain-home-in-image-wdt/simple-topology.yaml");
+          BaseTest.getResultDir()
+              + "/docker-images/OracleWebLogic/samples/12213-domain-home-in-image-wdt/simple-topology.yaml");
       ExecResult exec =
           TestUtils.exec(
-              "cat " + resultsDir
-                  + "/docker-images/OracleWebLogic/samples/"
-                  + "12213-domain-home-in-image-wdt/simple-topology.yaml");
-      LoggerHelper.getLocal().log(Level.FINEST, exec.stdout());
+              "cat "
+                  + BaseTest.getResultDir()
+                  + "/docker-images/OracleWebLogic/samples/12213-domain-home-in-image-wdt/simple-topology.yaml");
+      logger.log(Level.FINEST, exec.stdout());
     } else if (clusterType.equalsIgnoreCase("CONFIGURED")) {
       // domain on pv
-      StringBuffer createDomainJobTemplateFile = new StringBuffer(resultsDir);
+      StringBuffer createDomainJobTemplateFile = new StringBuffer(BaseTest.getResultDir());
       createDomainJobTemplateFile.append(
-          "/samples/scripts/create-weblogic-domain/domain-home-on-pv/"
-              + "create-domain-job-template.yaml");
+          "/samples/scripts/create-weblogic-domain/domain-home-on-pv/create-domain-job-template.yaml");
       TestUtils.exec("sed -i -e 's?DYNAMIC?CONFIGURED?g' " + createDomainJobTemplateFile);
     }
   }
 
   public int getLoadBalancerWebPort() {
     return loadBalancerWebPort;
-  }
-
-  public String getLoadBalancerName() {
-    return loadBalancer;
   }
 
   /**
@@ -2083,7 +1942,7 @@ public class Domain {
    * @throws Exception exception
    */
   public void shutdownManagedServerUsingServerStartPolicy(String msName) throws Exception {
-    LoggerHelper.getLocal().log(Level.INFO, "About to shutdown managed server <" + msName + ">");
+    logger.info("About to shutdown managed server <" + msName + ">");
     String patchStr =
         "'{\"spec\":{\"managedServers\":[{\"serverName\":\""
             + msName
@@ -2100,7 +1959,7 @@ public class Domain {
    * @throws Exception exception
    */
   public void restartManagedServerUsingServerStartPolicy(String msName) throws Exception {
-    LoggerHelper.getLocal().log(Level.INFO, "About to restart managed server <" + msName + "> ");
+    logger.info("About to restart managed server <" + msName + "> ");
     String patchStr =
         "'{\"spec\":{\"managedServers\":[{\"serverName\":\""
             + msName
@@ -2116,10 +1975,10 @@ public class Domain {
    *
    * @param webappName - Web App Name to be deployed
    * @param scriptName - a shell script to build WAR, EAR or JAR file and deploy the App in the
-   *                   admin pod
-   * @param username   - weblogic user name
-   * @param password   - weblogc password
-   * @param args       - optional args to add for script if needed
+   *     admin pod
+   * @param username - weblogic user name
+   * @param password - weblogc password
+   * @param args - optional args to add for script if needed
    * @throws Exception exception
    */
   public void callShellScriptToBuildDeployAppInPod(
@@ -2163,7 +2022,7 @@ public class Domain {
         .append(String.join(" ", args).toString())
         .append("'");
 
-    LoggerHelper.getLocal().log(Level.INFO, "Command to exec script file: " + cmdKubectlSh);
+    logger.info("Command to exec script file: " + cmdKubectlSh);
     ExecResult result = ExecCommand.exec(cmdKubectlSh.toString());
 
     String resultStr =
@@ -2187,13 +2046,13 @@ public class Domain {
   /**
    * Run the shell script in the admin pod.
    *
-   * @param successMarker   output string from script that indicates success
+   * @param successMarker output string from script that indicates success
    * @param scriptPathInPod - bash script path name in the pod
-   * @param args            - optional args to add for script if needed
+   * @param args - optional args to add for script if needed
    * @throws Exception exception
    */
   public void callShellScriptInAdminPod(
-      String successMarker, String scriptPathInPod, String... args)
+      String successMarker,  String scriptPathInPod, String... args)
       throws Exception {
 
     StringBuffer cmdKubectlSh = new StringBuffer("kubectl -n ");
@@ -2211,7 +2070,7 @@ public class Domain {
         .append(String.join(" ", args).toString())
         .append("'");
 
-    LoggerHelper.getLocal().log(Level.INFO, "Command to exec script file: " + cmdKubectlSh);
+    logger.info("Command to exec script file: " + cmdKubectlSh);
     ExecResult result = ExecCommand.exec(cmdKubectlSh.toString());
 
     String resultStr =
@@ -2240,7 +2099,7 @@ public class Domain {
    * configuration which contains hostname, db user, db password.
    *
    * @throws Exception when any of the kubectl commands to create config map, label, secret fails or
-   *                   if could not run them
+   *     if could not run them
    */
   private void createConfigMapAndSecretForSitConfig() throws Exception {
 
@@ -2293,13 +2152,13 @@ public class Domain {
    * Create dir to save Web App files Copy the shell script file and all App files over to the admin
    * pod Run the shell script to build WAR, EAR or JAR file and deploy the App in the admin pod.
    *
-   * @param appName    - Java App name to be deployed
+   * @param appName - Java App name to be deployed
    * @param scriptName - a shell script to build WAR, EAR or JAR file and deploy the App in the
-   *                   admin pod
-   * @param username   - weblogic user name
-   * @param password   - weblogc password
-   * @param args       - by default, a WAR file is created for a Web App and a EAR file is created for EJB
-   *                   App. this varargs gives a client a chance to change EJB's archive extenyion to JAR
+   *     admin pod
+   * @param username - weblogic user name
+   * @param password - weblogc password
+   * @param args - by default, a WAR file is created for a Web App and a EAR file is created for EJB
+   *     App. this varargs gives a client a chance to change EJB's archive extenyion to JAR
    * @throws Exception exception
    */
   public void buildDeployJavaAppInPod(
@@ -2339,8 +2198,7 @@ public class Domain {
       archiveExt = (args.length == 0) ? "ear" : args[0];
     }
 
-    LoggerHelper.getLocal().log(Level.INFO,
-        "Build and deploy: " + appName + "." + archiveExt + " in the admin pod");
+    logger.info("Build and deploy: " + appName + "." + archiveExt + " in the admin pod");
 
     // Create app dir in the admin pod
     StringBuffer mkdirCmd = new StringBuffer(" -- bash -c 'mkdir -p ");

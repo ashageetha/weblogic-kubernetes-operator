@@ -1,7 +1,7 @@
-# Copyright (c) 2019, 2020, Oracle Corporation and/or its affiliates.
+# Copyright (c) 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 # Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
-apiVersion: apps/v1
+apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
   name: coordinator
@@ -10,9 +10,6 @@ metadata:
     app: coordinator
 spec:
   replicas: 1
-  selector:
-    matchLabels:
-      app: coordinator
   strategy:
     type: Recreate
   template:
@@ -23,11 +20,9 @@ spec:
       containers:
         - name: coordinator
           image: config_coordinator
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Never
           ports:
             - containerPort: 8999
-      imagePullSecrets:
-        - name: ocirsecret
       restartPolicy: Always
 ---
 apiVersion: v1

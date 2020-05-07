@@ -1,61 +1,48 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.weblogic.domain.model;
 
-import java.util.Optional;
-import javax.annotation.Nonnull;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
 
 import com.google.gson.annotations.Expose;
+import com.google.gson.annotations.SerializedName;
 import oracle.kubernetes.json.Description;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 
-import static oracle.kubernetes.weblogic.domain.model.ObjectPatch.createObjectPatch;
-
 /** ServerStatus describes the current status of a specific WebLogic Server. */
-public class ServerStatus implements Comparable<ServerStatus>, PatchableComponent<ServerStatus> {
+public class ServerStatus implements Comparable<ServerStatus> {
 
   @Description("WebLogic Server name. Required.")
+  @SerializedName("serverName")
   @Expose
   @NotNull
   private String serverName;
 
   @Description("Current state of this WebLogic Server. Required.")
+  @SerializedName("state")
   @Expose
   @NotNull
   private String state;
 
   @Description("WebLogic cluster name, if the server is part of a cluster.")
+  @SerializedName("clusterName")
   @Expose
   private String clusterName;
 
   @Description("Name of node that is hosting the Pod containing this WebLogic Server.")
+  @SerializedName("nodeName")
   @Expose
   private String nodeName;
 
   @Description("Current status and health of a specific WebLogic Server.")
+  @SerializedName("health")
   @Expose
   @Valid
   private ServerHealth health;
-
-  public ServerStatus() {
-  }
-
-  /**
-   * Copy constructor for a deep copy.
-   * @param other the object to copy
-   */
-  ServerStatus(ServerStatus other) {
-    this.serverName = other.serverName;
-    this.state = other.state;
-    this.clusterName = other.clusterName;
-    this.nodeName = other.nodeName;
-    this.health = Optional.ofNullable(other.health).map(ServerHealth::new).orElse(null);
-  }
 
   /**
    * WebLogic Server name. Required.
@@ -157,6 +144,15 @@ public class ServerStatus implements Comparable<ServerStatus>, PatchableComponen
    * Name of node that is hosting the Pod containing this WebLogic Server.
    *
    * @param nodeName node name
+   */
+  public void setNodeName(String nodeName) {
+    this.nodeName = nodeName;
+  }
+
+  /**
+   * Name of node that is hosting the Pod containing this WebLogic Server.
+   *
+   * @param nodeName node name
    * @return this
    */
   public ServerStatus withNodeName(String nodeName) {
@@ -169,8 +165,17 @@ public class ServerStatus implements Comparable<ServerStatus>, PatchableComponen
    *
    * @return health
    */
-  private ServerHealth getHealth() {
+  public ServerHealth getHealth() {
     return health;
+  }
+
+  /**
+   * ServerHealth describes the current status and health of a specific WebLogic Server.
+   *
+   * @param health health
+   */
+  public void setHealth(ServerHealth health) {
+    this.health = health;
   }
 
   /**
@@ -225,23 +230,7 @@ public class ServerStatus implements Comparable<ServerStatus>, PatchableComponen
   }
 
   @Override
-  public int compareTo(@Nonnull ServerStatus o) {
+  public int compareTo(ServerStatus o) {
     return serverName.compareTo(o.serverName);
-  }
-
-  @Override
-  public boolean isPatchableFrom(ServerStatus other) {
-    return other.getServerName() != null && other.getServerName().equals(serverName);
-  }
-
-  private static final ObjectPatch<ServerStatus> serverPatch = createObjectPatch(ServerStatus.class)
-        .withStringField("serverName", ServerStatus::getServerName)
-        .withStringField("clusterName", ServerStatus::getClusterName)
-        .withStringField("state", ServerStatus::getState)
-        .withStringField("nodeName", ServerStatus::getNodeName)
-        .withObjectField("health", ServerStatus::getHealth, ServerHealth.getObjectPatch());
-
-  static ObjectPatch<ServerStatus> getObjectPatch() {
-    return serverPatch;
   }
 }

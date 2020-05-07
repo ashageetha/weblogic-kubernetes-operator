@@ -2,7 +2,7 @@
 title: "Sample Page"
 date: 2019-02-22T16:07:43-05:00
 draft: true
-weight: 100
+weight: 1
 ---
 
 ### Here is some neat stuff we can do

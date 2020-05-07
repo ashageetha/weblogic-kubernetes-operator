@@ -25,9 +25,6 @@ weight: 6
 1.	Create a new image with a domain home by running the [create-domain](http://github.com/oracle/weblogic-kubernetes-operator/blob/master/kubernetes/samples/scripts/create-weblogic-domain/domain-home-in-image/create-domain.sh) script. First, copy the sample [create-domain-inputs.yaml](http://github.com/oracle/weblogic-kubernetes-operator/blob/master/kubernetes/samples/scripts/create-weblogic-domain/domain-home-in-image/create-domain-inputs.yaml) file and update your copy with:  
        * `domainUID`: `sample-domain1`
        * `image`: Leave empty unless you need to tag the new image that the script builds to a different name.
-          For example if you are using a remote cluster that will need to pull the image from a Docker registry, 
-          then you should set this value to the fully qualified image name.  Note that you will need to 
-          push the image manually. 
        * `weblogicCredentialsSecretName`: `sample-domain1-weblogic-credentials`
        * `namespace`: `sample-domain1-ns`
        * `domainHomeImageBase`: `container-registry.oracle.com/middleware/weblogic:12.2.1.3`
@@ -64,8 +61,6 @@ weight: 6
 
 1.	Create an Ingress for the domain, in the domain namespace, by using the [sample](http://github.com/oracle/weblogic-kubernetes-operator/blob/master/kubernetes/samples/charts/ingress-per-domain/README.md) Helm chart:
 
-    For Helm 2.x:
-    
     ```bash
     $ helm install kubernetes/samples/charts/ingress-per-domain \
       --name sample-domain1-ingress \
@@ -73,16 +68,6 @@ weight: 6
       --set wlsDomain.domainUID=sample-domain1 \
       --set traefik.hostname=sample-domain1.org
     ```
-  
-    For Helm 3.x:
-    
-    ```bash
-    $ helm install sample-domain1-ingress kubernetes/samples/charts/ingress-per-domain \
-      --namespace sample-domain1-ns \
-      --set wlsDomain.domainUID=sample-domain1 \
-      --set traefik.hostname=sample-domain1.org
-    ```
-    
 
 1.	To confirm that the load balancer noticed the new Ingress and is successfully routing to the domain's server pods,
     you can send a request to the URL for the "WebLogic ReadyApp framework" which will return a HTTP 200 status code, as

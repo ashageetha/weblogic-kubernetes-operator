@@ -1,4 +1,4 @@
-// Copyright (c) 2017, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2017, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.wlsconfig;
@@ -161,10 +161,6 @@ public class WlsDomainConfig implements WlsDomain {
     return "/management/weblogic/latest/domainConfig/search";
   }
 
-  /**
-   * JSON payload for retrieve servers REST request.
-   * @return payload
-   */
   public static String getRetrieveServersSearchPayload() {
     return "{ fields: [ "
         + getSearchFields()
@@ -230,11 +226,6 @@ public class WlsDomainConfig implements WlsDomain {
     return null;
   }
 
-  /**
-   * Get cluster name.
-   * @param serverName server name
-   * @return cluster name
-   */
   public String getClusterName(String serverName) {
     return getConfiguredClusters().stream()
         .filter(c -> c.hasNamedServer(serverName))
@@ -450,13 +441,6 @@ public class WlsDomainConfig implements WlsDomain {
     return getClusterConfigs().get(clusterName).getMaxClusterSize();
   }
 
-  /**
-   * Build with admin server.
-   * @param adminServerName admin server name
-   * @param listenAddress listen address
-   * @param port port
-   * @return domain config
-   */
   public WlsDomainConfig withAdminServer(String adminServerName, String listenAddress, int port) {
     setAdminServerName(adminServerName);
     addWlsServer(adminServerName, listenAddress, port);
@@ -564,9 +548,6 @@ public class WlsDomainConfig implements WlsDomain {
     return builder.isEquals();
   }
 
-  /**
-   * Process dynamic clusters.
-   */
   public void processDynamicClusters() {
     for (WlsClusterConfig wlsClusterConfig : configuredClusters) {
       wlsClusterConfig.setWlsDomainConfig(this);

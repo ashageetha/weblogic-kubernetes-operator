@@ -1,10 +1,11 @@
-// Copyright (c) 2019, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator.utils;
 
 import java.util.Map;
-import java.util.logging.Level;
+
+import oracle.kubernetes.operator.BaseTest;
 
 /**
  * JRF Domain class with all the utility methods.
@@ -34,12 +35,6 @@ public class JrfDomain extends Domain {
     this(inputDomainMap, false);
   }
 
-  /**
-   * Construct JRF domain.
-   * @param inputDomainMap input map
-   * @param adminPortEnabled admin port enabled flag
-   * @throws Exception on failure
-   */
   public JrfDomain(Map<String, Object> inputDomainMap, boolean adminPortEnabled) throws Exception {
     initialize(inputDomainMap);
     updateDomainMapForJrf(adminPortEnabled);
@@ -72,7 +67,7 @@ public class JrfDomain extends Domain {
     // update create-domain-script.sh if adminPortEnabled is true
     if (adminPortEnabled) {
       String createDomainScript =
-          domainMap.get("resultDir")
+          BaseTest.getResultDir()
               + "/samples/scripts/create-fmw-infrastructure-domain/domain-home-on-pv/wlst/create-domain-script.sh";
       TestUtils.replaceStringInFile(
           createDomainScript,
@@ -100,7 +95,7 @@ public class JrfDomain extends Domain {
         String.format(
             "kubectl label secret %s -n %s weblogic.domainUID=%s weblogic.domainName=%s",
             rucSecret.getSecretName(), domainNS, domainUid, domainUid);
-    LoggerHelper.getLocal().log(Level.INFO, "running command " + labelCmd);
+    logger.info("running command " + labelCmd);
     TestUtils.exec(labelCmd);
   }
 }

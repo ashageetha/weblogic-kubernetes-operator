@@ -10,18 +10,9 @@ weight: 7
 
 1.	Remove the domain's Ingress by using `helm`:
 
-    For Helm 2.x:
-    
     ```bash
     $ helm delete --purge sample-domain1-ingress
     ```
-    
-    For Helm 3.x:
-
-    ```bash
-    $ helm uninstall sample-domain1-ingress -n sample-domain1-ns
-    ```
-
 1.	Remove the domain resources by using the sample [`delete-weblogic-domain-resources`](http://github.com/oracle/weblogic-kubernetes-operator/blob/master/kubernetes/samples/scripts/delete-domain/delete-weblogic-domain-resources.sh) script:
 
     ```bash
@@ -37,24 +28,25 @@ weight: 7
 
 #### Remove the domain namespace.
 1.	Configure the Traefik load balancer to stop managing the Ingresses in the domain namespace:
-    
+
     ```bash
-    $ helm upgrade traefik-operator stable/traefik \
-        --namespace traefik \
-        --reuse-values \
-        --set "kubernetes.namespaces={traefik}" \
-        --wait 
+    $ helm upgrade \
+      --reuse-values \
+      --set "kubernetes.namespaces={traefik}" \
+      --wait \
+      traefik-operator \
+      stable/traefik
     ```
 
 1.	Configure the operator to stop managing the domain:
-    
+
     ```bash
-    $ helm upgrade  sample-weblogic-operator \
-                  kubernetes/charts/weblogic-operator \
-      --namespace sample-weblogic-operator-ns \
+    $ helm upgrade \
       --reuse-values \
       --set "domainNamespaces={}" \
       --wait \
+      sample-weblogic-operator \
+      kubernetes/charts/weblogic-operator
     ```
 1.	Delete the domain namespace:
 
@@ -67,18 +59,10 @@ weight: 7
 
 1.	Remove the operator:
 
-    For Helm 2.x:
-    
     ```bash
     $ helm delete --purge sample-weblogic-operator
     ```
 
-    For Helm 3.x:
-    
-    ```bash
-    $ helm uninstall sample-weblogic-operator -n sample-weblogic-operator-ns
-    ```
-    
 1.	Remove the operator's namespace:
 
     ```bash
@@ -89,18 +73,10 @@ weight: 7
 
 1.	Remove the Traefik load balancer:
 
-    For Helm 2.x:
-    
     ```bash
     $ helm delete --purge traefik-operator
     ```
 
-    For Helm 3.x:
-    
-    ```bash
-    $ helm uninstall traefik-operator -n traefik
-    ```
-    
 1.	Remove the Traefik namespace:
 
     ```bash

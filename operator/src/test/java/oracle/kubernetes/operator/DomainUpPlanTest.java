@@ -1,4 +1,4 @@
-// Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+// Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 // Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 package oracle.kubernetes.operator;
@@ -9,11 +9,10 @@ import java.util.List;
 import java.util.Optional;
 
 import com.meterware.simplestub.Memento;
-import io.kubernetes.client.openapi.models.V1ContainerPort;
-import io.kubernetes.client.openapi.models.V1ObjectMeta;
-import io.kubernetes.client.openapi.models.V1Pod;
-import io.kubernetes.client.openapi.models.V1SecretReference;
-import io.kubernetes.client.openapi.models.V1SubjectRulesReviewStatus;
+import io.kubernetes.client.models.V1ContainerPort;
+import io.kubernetes.client.models.V1ObjectMeta;
+import io.kubernetes.client.models.V1Pod;
+import io.kubernetes.client.models.V1SecretReference;
 import oracle.kubernetes.operator.helpers.DomainPresenceInfo;
 import oracle.kubernetes.operator.helpers.KubernetesTestSupport;
 import oracle.kubernetes.operator.helpers.TuningParametersStub;
@@ -65,10 +64,6 @@ public class DomainUpPlanTest {
     return DomainPresenceStep.createDomainPresenceStep(domain, adminStep, managedServersStep);
   }
 
-  /**
-   * Setup test environment.
-   * @throws NoSuchFieldException if test support fails to install.
-   */
   @Before
   public void setUp() throws NoSuchFieldException {
     mementos.add(TestUtils.silenceOperatorLogger());
@@ -78,15 +73,9 @@ public class DomainUpPlanTest {
     testSupport.addDomainPresenceInfo(domainPresenceInfo);
   }
 
-  /**
-   * Cleanup test environment.
-   * @throws Exception if test support fails.
-   */
   @After
   public void tearDown() throws Exception {
-    for (Memento memento : mementos) {
-      memento.revert();
-    }
+    for (Memento memento : mementos) memento.revert();
 
     testSupport.throwOnCompletionFailure();
   }
@@ -194,7 +183,7 @@ public class DomainUpPlanTest {
 
   @SuppressWarnings("unused")
   static class ContainerPortMatcher
-      extends org.hamcrest.TypeSafeDiagnosingMatcher<io.kubernetes.client.openapi.models.V1Pod> {
+      extends org.hamcrest.TypeSafeDiagnosingMatcher<io.kubernetes.client.models.V1Pod> {
     private int expectedPort;
 
     private ContainerPortMatcher(int expectedPort) {
@@ -207,9 +196,8 @@ public class DomainUpPlanTest {
 
     @Override
     protected boolean matchesSafely(V1Pod item, Description mismatchDescription) {
-      if (getContainerPorts(item).stream().anyMatch(p -> p.getContainerPort() == expectedPort)) {
+      if (getContainerPorts(item).stream().anyMatch(p -> p.getContainerPort() == expectedPort))
         return true;
-      }
 
       mismatchDescription.appendText("No matching port found in pod ").appendText(item.toString());
       return false;
@@ -271,12 +259,11 @@ public class DomainUpPlanTest {
 
     @Override
     public void describeTo(Description description) {
-      if (expectedSteps.length == 1) {
+      if (expectedSteps.length == 1)
         description.appendText("expected step ").appendValue(expectedSteps[0]);
-      } else {
+      else
         description.appendValueList(
             "expected steps in order to include: ", ",", ".", expectedSteps);
-      }
     }
   }
 
@@ -284,11 +271,6 @@ public class DomainUpPlanTest {
     @Override
     public PodAwaiterStepFactory getPodAwaiterStepFactory(String namespace) {
       return new NullPodWaiter();
-    }
-
-    @Override
-    public V1SubjectRulesReviewStatus getSubjectRulesReviewStatus(String namespace) {
-      return null;
     }
   }
 }
