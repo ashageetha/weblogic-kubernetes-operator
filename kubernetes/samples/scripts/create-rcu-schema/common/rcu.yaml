@@ -10,8 +10,8 @@ spec:
   - args:
     - sleep
     - infinity
-    image: container-registry.oracle.com/middleware/fmw-infrastructure:12.2.1.3
-    imagePullPolicy: Always
+    image: container-registry.oracle.com/middleware/fmw-infrastructure:12.2.1.4
+    imagePullPolicy: IfNotPresent
     name: rcu
   imagePullSecrets:
            - name: docker-store
