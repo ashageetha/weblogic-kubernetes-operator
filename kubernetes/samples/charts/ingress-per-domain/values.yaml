@@ -15,7 +15,7 @@ tls: NONSSL
 
 # domainType Supported values are soa,soaess,osb,soaosb and soaessosb.
 # Make sure only one of these is uncommented.
-domainType: soa
+domainType: soaessosb
 #domainType: osb
 #domainType: soaess
 #domainType: soaosb
@@ -34,7 +34,7 @@ wlsDomain:
 # Traefik specific values
 traefik:
   # hostname used by host-routing
-  hostname: domain1.org
+  hostname: 
 
 # Voyager specific values
 voyager:
