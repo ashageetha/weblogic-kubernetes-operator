@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: basic-auth
+  namespace: monitoring
+data:
+  password: V2VsY29tZTE= # Welcome1 i.e.'WebLogic password'
+  user: d2VibG9naWM= # weblogic  i.e. 'WebLogic username'
+type: Opaque
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: wls-exporter-admin
+  namespace: monitoring
+  labels:
+    k8s-app: wls-exporter
+spec:
+  namespaceSelector:
+    matchNames:
+    - soans
+  selector:
+    matchLabels:
+      weblogic.serverName: AdminServer
+      weblogic.domainName: soainfra
+  endpoints:
+  - basicAuth:
+      password:
+        name: basic-auth
+        key: password
+      username:
+        name: basic-auth
+        key: user
+    port: default
+    relabelings:
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+    interval: 10s
+    honorLabels: true
+    path: /wls-exporter-admin/metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: wls-exporter-soa
+  namespace: monitoring
+  labels:
+    k8s-app: wls-exporter
+spec:
+  namespaceSelector:
+    matchNames:
+    - soans
+  selector:
+    matchLabels:
+      weblogic.domainName: soainfra
+      weblogic.clusterName: soa_cluster
+      serviceType: SERVER
+  endpoints:
+  - basicAuth:
+      password:
+        name: basic-auth
+        key: password
+      username:
+        name: basic-auth
+        key: user
+    port: default
+    relabelings:
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+    interval: 10s
+    honorLabels: true
+    path: /wls-exporter-soa/metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: wls-exporter-osb
+  namespace: monitoring
+  labels:
+    k8s-app: wls-exporter
+spec:
+  namespaceSelector:
+    matchNames:
+    - soans
+  selector:
+    matchLabels:
+      weblogic.domainName: soainfra
+      weblogic.clusterName: osb_cluster
+      serviceType: SERVER
+  endpoints:
+  - basicAuth:
+      password:
+        name: basic-auth
+        key: password
+      username:
+        name: basic-auth
+        key: user
+    port: default
+    relabelings:
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+    interval: 10s
+    honorLabels: true
+    path: /wls-exporter-osb/metrics
+
