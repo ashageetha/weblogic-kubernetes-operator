@@ -1,65 +1,11 @@
-Deploy SOA on OKE with Weblogic Kubernetes Operator
+# SOA on OKE with Oracle WebLogic Server Kubernetes Operator Tutorial #
 
-1. Clone the SOA Operator 2.5.0 for 12.2.1.4 git repository to oci shell
+### Deploy a SOA/OSB Domain  ###
 
-   `$ git clone https://github.com/ashageetha/weblogic-kubernetes-operator.git -b soa_2.5.0_12.2.1.4`
+#### Prepare the Kubernetes cluster to run SOA domains ####
 
-   ```bash
-    Output should be something like below
-    Output
-    Cloning into 'weblogic-kubernetes-operator'...
-    remote: Enumerating objects: 18, done.
-    remote: Counting objects: 100% (18/18), done.
-    remote: Compressing objects: 100% (17/17), done.
-    remote: Total 137218 (delta 1), reused 12 (delta 1), pack-reused 137200
-    Receiving objects: 100% (137218/137218), 102.44 MiB | 27.30 MiB/s, done.
-    Resolving deltas: 100% (81773/81773), done.
-    Checking out files: 100% (8398/8398), done.
-    ```
-2.   Install the WebLogic Kubernetes Operator 2.5.0
 
-        Kubernetes distinguishes between the concept of a user account and a service account for a number of reasons. The main reason is that user accounts are for humans while service accounts are for processes, which run in pods. The operator also requires service accounts. If a service account is not specified, it defaults to default (for example, the namespace's default service account). If you want to use a different service account, then you must create the operator's namespace and the service account before installing the operator Helm chart.
-       
-       a. Create the operator namespace (opns) in advance
-        ```bash
-        $ kubectl create namespace opns
-        ```
-
-        b. Create the service account (op-sa)  for the operator in the operator's namespace:
-        ```bash
-        $ kubectl create serviceaccount -n opns  op-sa
-        ```
-        c. Install the Operator using Helm
-        ```bash
-        $ cd ~/weblogic-kubernetes-operator
-        $ helm install weblogic-kubernetes-operator kubernetes/charts/weblogic-operator --namespace opns  --set image=oracle/weblogic-kubernetes-operator:2.5.0 --set serviceAccount=op-sa --set "domainNamespaces={}" --wait
-        ```
-        Output should be something like below
-        ```bash
-        NAME: weblogic-kubernetes-operator
-        LAST DEPLOYED: Mon Jun  1 10:46:24 2020
-        NAMESPACE: opns
-        STATUS: deployed
-        REVISION: 1
-        TEST SUITE: None
-        ```
-        Verify the Operator pod
-        ```bash
-        $ kubectl get pods -n opns
-        NAME                                 READY   STATUS    RESTARTS   AGE
-        weblogic-operator-8688fb44b7-c4qk9   1/1     Running   0          5m25s
-        ```
-        Verify the Operator helm Charts
-
-        ```bash
-        $ helm list -n opns
-        NAME                            NAMESPACE       REVISION        UPDATED                                 STATUS          CHART                   APP VERSION
-        weblogic-kubernetes-operator    opns            1               2020-06-01 10:46:24.821204106 +0000 UTC deployed        weblogic-operator-2.5.0
-        ```
-
-        The WebLogic Server Kubernetes Operator v2.5.0 has been installed.  Continue with SOA Domain setup.
-
-3. Prepare the environment for Domain creation
+Prepare the environment for Domain creation
     a. Create the domain namespace
     ```bash
     $ kubectl create namespace soans
@@ -104,7 +50,7 @@ Deploy SOA on OKE with Weblogic Kubernetes Operator
         $ ./create-rcu-credentials.sh -u SOA1 -p Oradoc_db1 -a sys -q Oradoc_db1 -d soainfra -n soans -s soainfra-rcu-credentials
     ```
 
-4. Create a kubernetes PV and PVC  (Persistent Volume and Persistent Volume Claim). Here we will use the created NFS Server and mount Path at Step 5 for domain home.
+Create a kubernetes PV and PVC  (Persistent Volume and Persistent Volume Claim). Here we will use the created NFS Server and mount Path at Step 5 for domain home.
 
     Update the create-pv-pvc-inputs.yaml.Make sure to update the "weblogicDomainStorageNFSServer: 10.0.1.6" with the NFS Server IP as per your Environment, rest are updated for you in the repository:
             $ cd ~/weblogic-kubernetes-operator/kubernetes/samples/scripts/create-weblogic-domain-pv-pvc
@@ -161,7 +107,7 @@ Deploy SOA on OKE with Weblogic Kubernetes Operator
             $ kubectl create -f  output/pv-pvcs/soainfra-domain-pv.yaml
             $ kubectl create -f  output/pv-pvcs/soainfra-domain-pvc.yaml
 
-    Create the imagePullSecrets (in soans namespace) so that Kubernetes Deployment can pull the image automatically from OCIR with below command :
+Create the imagePullSecrets (in soans namespace) so that Kubernetes Deployment can pull the image automatically from OCIR with below command :
     Note: Create the imagePullSecret as per your environement
     $ kubectl create secret docker-registry image-secret -n soans --docker-server=phx.ocir.io  --docker-username=tenancy-foo/me@oracle.com --docker-password='bxnXvug9A2vvnI(;fczF'  --docker-email=me@oracle.com
 
@@ -171,7 +117,7 @@ Deploy SOA on OKE with Weblogic Kubernetes Operator
       Username and email address    :   me@oracle.com
       Auth Token Password           :   bxnXvug9A2vvnI(;fczF
 
-    Install and start the Database
+Install and start the Database
 
     NOTE: This step is required only when standalone database was not already setup and the user wanted to use the database in a container.
     The Oracle Database Docker images are supported only for non-production use. For more details, see My Oracle Support note: Oracle Support for Database Running on Docker (Doc ID 2216342.1). For production usecase it is suggested to use a standalone db.
@@ -223,7 +169,7 @@ Deploy SOA on OKE with Weblogic Kubernetes Operator
     Once database is created successfully, you can use the database connection string, "oracle-db.soans.svc.cluster.local:1521/devpdb.k8s", as an rcuDatabaseURL parameter in the create-domain-inputs.yaml file.
 
 
-    Run the RCU to create SOA schemas
+Run the RCU to create SOA schemas
 
     To install SOA schemas, run the "create-rcu-schema.sh" script with below inputs:
 
@@ -401,7 +347,7 @@ Deploy SOA on OKE with Weblogic Kubernetes Operator
     Repository Creation Utility - Create : Operation Completed
     [INFO] Modify the domain.input.yaml to use [oracle-db.soans.svc.cluster.local:1521/devpdb.k8s] as rcuDatabaseURL and [SOA1] as rcuSchemaPrefix
 
-    Create the domain
+Create the domain
 
         The input "create-domain-inputs.yaml" is updated with below values.
 

@@ -44,7 +44,7 @@ Open the navigation menu. Under **Identity**, select **Policies**.
 
 In the left side menu, select a "root" compartment for your account (see screenshot below). A list of the policies in the compartment you're viewing is displayed. If you want to attach the policy to a compartment other than the one you're viewing, select the desired compartment from the drop down list on the left. Click **Create Policy**.
 
-![alt text](../images/oke/005.policies.png)
+![alt text](../images/oke/005.oci.console.create.policies.png)
 
 Enter the following:
 
@@ -56,7 +56,7 @@ Enter the following:
 
 Click **Create**.
 
-![alt text](../images/oke/006.create.oke.policy.png)
+![alt text](../images/oke/006.oci.create.oke.policy.png)
 
 #### Create an OKE cluster ####
 
@@ -64,45 +64,57 @@ The *Quick Create* feature uses the default settings to create a *quick cluster*
 
 In the Console, open the navigation menu. Under *Solutions, Platform and Edge*, go to *Developer Services* and select **Container Clusters (OKE)**.
 
-![alt text](../images/oke/007.clusters.png)
+![alt text](../images/oke/007.oci.console.oke.create.png)
 
-On the Cluster List page, click **Create Cluster**.
+Choose a *Compartment* you have permission to work in. Here we will use *soademo* compartment
 
-![alt text](../images/oke/008.create.cluster.png)
+On the Cluster List page, select the Compartment and click **Create Cluster**.
+
+![alt text](../images/oke/008.oci.console.oke.create.cluster.png)
 
 In the Create Cluster Solution dialog, select *Quick Create* and click **Launch Workflow**.
 
-![alt text](../images/oke/009.quick.1.png)
+![alt text](../images/oke/009.oci.console.oke.quick.cluster.png)
 
 Select **Quick Create** to create a new cluster with the default settings, along with new network resources for the new cluster.
 
 The Create Virtual Cloud Network panel shows the network resources that will be created for you by default, namely a VCN, two load balancer subnets, and three worker node subnets.
 
 Specify the following configuration details on the Cluster Creation page:
-- **Name**: The name of the cluster. Leave the default value.
-- **Compartment**: The name of the compartment. Leave the default value.
-- **Kubernetes version**: The version of Kubernetes. Leave the default value. (Don't select version 16 even if it is default version; please select version 15 in such cases.)
-- **Choose Visibility Type**: Is the cluster going to be routable or not. Leave the default value.
-- **Shape**: The shape to use for each node in the node pool. The shape determines the number of CPUs and the amount of memory allocated to each node. The list shows only those shapes available in your tenancy that are supported by OKE. Select the available *VM.Standard2.1*.
+- **Name**: soaoke (The name of the cluster)
+- **Compartment**: soademo (The name of the compartment)
+- **Kubernetes version**: v1.15.7 (The version of Kubernetes. Don't select version 16 even if it is default version; please select version 15 in such cases.)
+- **Choose Visibility Type**: Private (Is the cluster going to be routable or not)
+- **Shape**: VM.Standard2.1 (The shape to use for each node in the node pool. The shape determines the number of CPUs and the amount of memory allocated to each node. The list shows only those shapes available in your tenancy that are supported by OKE. Select the available *VM.Standard2.1*)
 - **Number of nodes**: The number of worker nodes to create. Leave the default value, *3*
 - **Kubernetes Dashboard Enabled**: Leave the default false (`DISABLED`).
-- **Tiller (Helm) Enabled**: Leave the default false (`DISABLED`).
 
 Click **Next** to review the details you entered for the new cluster.
 
-![alt text](../images/oke/009.quick.details.ocishell.1.png)
-![alt text](../images/oke/009.quick.details.ocishell.2.png)
+![alt text](../images/oke/010.oci.console.oke.cluster.creation1.png)
 
-On the *Review* page, click **Submit** to create the new network resources and the new cluster.
+On the *Review* page, click **Create Cluster** to create the new network resources and the new cluster.
 
-![alt text](../images/oke/009.quick.review.ocishell.1.png)
-![alt text](../images/oke/009.quick.review.ocishell.2.png)
+![alt text](../images/oke/011.oci.console.oke.cluster.creation2.png)
 
-You see the network resources being created for you.
+Container Engine for Kubernetes starts creating resources (as shown in the Creating cluster and associated network resources dialog).
+Click Close to return to the Console.
 
-![alt text](../images/oke/009.quick.submitted.ocishell.png)
+![alt text](../images/oke/012.oci.console.oke.cluster.creation3.png)
 
-Click **Close** and the new cluster is shown on the *Cluster Details* page. When it has been created, the new cluster has a status of *Active*.
+Click **Close** and the new cluster is shown on the *Cluster Details* page. Initially the status will be *Creating*. When it has been created, the new cluster has a status of *Active*.
+
+![alt text](../images/oke/013.oci.console.oke.clusters.png)
+![alt text](../images/oke/014.oci.console.oke.cluster.active.png)
+
+Click on the *Node Pools* on Resources and then **View** to view the Node Pool and worker node status
+
+![alt text](../images/oke/015.oci.console.oke.nodepool.view.png)
+
+You can view the status of Worker node and make sure all Node State in Active and Kubernetes Node Condition is Ready.
+Note:  The worker node gets listed in the kubectl command once the "Kubernetes Node Condition" is Ready.
+
+![alt text](../images/oke/016.oci.console.oke.nodepool.view1.png)
 
 #### OCI Cloud Shell ####
 
@@ -110,11 +122,11 @@ Oracle Cloud Infrastructure (OCI) Cloud Shell is a web browser-based terminal, a
 
 Click the Cloud Shell icon in the Console header (top right area in the browser).
 
-![alt text](../images/oke/020.ocishell.start.png)
+![alt text](../images/oke/017.oci.console.oke.cloud.shell.png)
 
 Wait a few seconds for the Cloud Shell to appear.
 
-![alt text](../images/oke/021.ocishell.started.png)
+![alt text](../images/oke/018.oci.console.oke.cloud.shell.created.png)
 
 You can minimize and restore the terminal size at any time.
 
@@ -124,17 +136,17 @@ Your Cloud Shell comes with the OCI CLI pre-authenticated, so there’s no setup
 
 To complete the `kubectl` configuration, click **Access Kubeconfig** on your cluster detail page. (If you moved away from that page, then open the navigation menu and under **Developer Services**, select **Clusters**. Select your cluster and go the detail page.
 
-![alt text](../images/oke/022.ocishell.access.config.png)
+![alt text](../images/oke/019.oci.console.oke.cloud.shell.access.png)
 
 A dialog appears which contains the customized OCI command that you need to execute, to create a Kubernetes configuration file.
 
 Select the **Copy** link to copy the `oci ce...` command to Cloud Shell, then close the configuration dialog before you paste the command into the terminal.
 
-![alt text](../images/oke/023.ocishell.config.dialog.png)
+![alt text](../images/oke/![alt text](../images/oke/020.oci.console.oke.cloud.shell.clusteraccess.png))
 For example, the command looks like the following:
 ```bash
 $ oci ce cluster create-kubeconfig --cluster-id ocid1.cluster.oc1.THIS_IS_EXAMPLE_DONT_COPY_PASTE_FROM_HERE --file $HOME/.kube/config --region us-phoenix-1 --token-version 2.0.0
-New config written to the Kubeconfig file /home/peter_nagy/.kube/config
+New config written to the Kubeconfig file /home/ashageetha/.kube/config
 ```
 Now check that `kubectl` is working, for example, using the `get node` command:
 ```bash
@@ -154,7 +166,7 @@ In order to have permission to access the Kubernetes cluster, you need to author
 
 In the Console, select your OCI user name and select User Settings. On the user details page, you will find the user OCID. Select Copy and paste it temporarily in a text editor.
 
-![alt text](../images/oke/010.user.ocid.png)
+![alt text](../images/oke/021.oci.user.ocid.png)
 
 Then execute the role binding command using your(!) user OCID:
 ```bash

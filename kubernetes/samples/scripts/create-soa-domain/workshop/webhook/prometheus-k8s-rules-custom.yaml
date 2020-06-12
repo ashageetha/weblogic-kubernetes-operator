@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+  name: prometheus-k8s-rules-custom
+  namespace: monitoring
+spec:
+  groups:
+  - name: custom-rules
+    rules:
+    - alert: ClusterWarning
+      expr: sum by (weblogic_domainUID,weblogic_clusterName)  (up{weblogic_domainUID=~".+",weblogic_serverName!="AdminServer"}) == 1
+      for: 1m
+      labels:
+        severity: page
+      annotations:
+        summary: "Some WLS Cluster has only one running server for more than 1 minute"
+        description: "Some WLS Cluster is in Warning State"
