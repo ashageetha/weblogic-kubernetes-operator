@@ -142,7 +142,7 @@ A dialog appears which contains the customized OCI command that you need to exec
 
 Select the **Copy** link to copy the `oci ce...` command to Cloud Shell, then close the configuration dialog before you paste the command into the terminal.
 
-![alt text](../images/oke/![alt text](../images/oke/020.oci.console.oke.cloud.shell.clusteraccess.png))
+![alt text](../images/oke/020.oci.console.oke.cloud.shell.clusteraccess.png))
 For example, the command looks like the following:
 ```bash
 $ oci ce cluster create-kubeconfig --cluster-id ocid1.cluster.oc1.THIS_IS_EXAMPLE_DONT_COPY_PASTE_FROM_HERE --file $HOME/.kube/config --region us-phoenix-1 --token-version 2.0.0
