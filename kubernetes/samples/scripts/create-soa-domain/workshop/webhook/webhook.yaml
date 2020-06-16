@@ -16,6 +16,8 @@ spec:
       labels:
          name: webhook
     spec:
+      imagePullSecrets:
+      - name: image-secret
       containers:
       - image: webhook:1.0
         imagePullPolicy: IfNotPresent
