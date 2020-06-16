@@ -19,7 +19,7 @@ spec:
       imagePullSecrets:
       - name: image-secret
       containers:
-      - image: webhook:1.0
+      - image: fra.ocir.io/frsi9r3mtqxk/oracle/webhook:1.0
         imagePullPolicy: IfNotPresent
         name: webhook
         ports:
