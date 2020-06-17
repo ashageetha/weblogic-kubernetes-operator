@@ -19,7 +19,7 @@ c. Update 'prometheus-prometheus.yaml'  to add the externalURL, as in the upcomi
 Note: This step may vary based on the ingress rules created
 ```bash
 $ cd ~/kube-prometheus-0.3.0/manifests
-$ sed -i -e "s:replicas\: 2:replicas\: 2\\n  externalURL\: http\://${TRAEFIK_PUBLIC_IP}/prometheus:g" prometheus-prometheus.yaml
+$ sed -i -e "s:replicas\: 2:replicas\: 2\\n  externalUrl\: http\://${TRAEFIK_PUBLIC_IP}/prometheus:g" prometheus-prometheus.yaml
 ```
 
 d. Create the kube-prometheus resources
