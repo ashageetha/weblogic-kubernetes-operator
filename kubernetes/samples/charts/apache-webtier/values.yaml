@@ -1,11 +1,11 @@
-# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
+# Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates.  All rights reserved.
 # Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
  
 # Apache webtier docker image
-image: "store/oracle/apache:12.2.1.3"
+image: "phx.ocir.io/paasreleaseeng/openshiftpoc/oracle/apache:12.2.1.3"
 
 # imagePullPolicy specifies the image pull policy for the apache webiter docker image
-imagePullPolicy: "IfNotPresent"
+imagePullPolicy: "Always"
 
 # imagePullSecrets contains an optional list of Kubernetes secrets, that are needed
 # to access the registry containing the apache webtier Docker image.
@@ -13,8 +13,8 @@ imagePullPolicy: "IfNotPresent"
 # 
 # Example : a secret is needed, and has been stored in 'my-apache-webtier-secret'
 #
-# imagePullSecrets:
-# - name: my-apache-webtier-secret
+imagePullSecrets: "soans-asharao-ocir-secret"
+
 #
 # imagePullSecrets:
 # - name:
@@ -23,44 +23,44 @@ imagePullPolicy: "IfNotPresent"
 # mount be disabled and, thereforem the built-in Apache plugin config be used.
 # Use this to provide your own Apache webtier configuration as needed; simply define this 
 # path and put your own custom_mod_wl_apache.conf file under this path.
-volumePath:
+persistentVolumeClaimName: webtier-apache-pvc
 
 # Boolean indicating if RBAC resources should be created
-createRBAC: true
+#createRBAC: true
 
 # NodePort to expose for http access
-httpNodePort: 30305
+#httpNodePort: 30305
 
 # NodePort to expose for https access
-httpsNodePort: 30443
+#httpsNodePort: 30443
 
 # The VirtualHostName of the Apache HTTP server. It is used to enable custom SSL configuration.
 # If it is set, the Apache HTTP Server is configured to listen to port 4433 for SSL traffic.
-virtualHostName:
+#virtualHostName: tf-soans-asharao.apps.c1.openshift4.weblogick8s.org 
 
 # The customer supplied certificate to use for Apache webtier SSL configuration.
 # The value must be a string containing a base64 encoded certificate.
 # If 'virtualHostName' is set, the custom certificate and private key are not provided,
 # the default built-in auto-generated sample certificate and private key in the apache image will be used.
 # This parameter is ignored if 'virtualHostName' is not set.
-customCert:
+#customCert: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUQ3RENDQXRRQ0NRRGtGTnNZUUE2NEdEQU5CZ2txaGtpRzl3MEJBUXNGQURDQnR6RUxNQWtHQTFVRUJoTUMKVlZNeEN6QUpCZ05WQkFnTUFrTkJNUmN3RlFZRFZRUUhEQTVTWldSM2IyOWtJRk5vYjNKbGN6RWJNQmtHQTFVRQpDZ3dTVDNKaFkyeGxJRU52Y25CdmNtRjBhVzl1TVNjd0pRWURWUVFMREI1QmNHRmphR1VnU0ZSVVVDQlRaWEoyClpYSWdWMmwwYUNCUWJIVm5hVzR4UERBNkJnTlZCQU1NTTNSbUxYTnZZVzV6TFdGemFHRnlZVzh1WVhCd2N5NWoKTVM1dmNHVnVjMmhwWm5RMExuZGxZbXh2WjJsamF6aHpMbTl5WnpBZUZ3MHlNREExTVRReE5UQXlOVEJhRncwegpNREExTVRJeE5UQXlOVEJhTUlHM01Rc3dDUVlEVlFRR0V3SlZVekVMTUFrR0ExVUVDQXdDUTBFeEZ6QVZCZ05WCkJBY01EbEpsWkhkdmIyUWdVMmh2Y21Wek1Sc3dHUVlEVlFRS0RCSlBjbUZqYkdVZ1EyOXljRzl5WVhScGIyNHgKSnpBbEJnTlZCQXNNSGtGd1lXTm9aU0JJVkZSUUlGTmxjblpsY2lCWGFYUm9JRkJzZFdkcGJqRThNRG9HQTFVRQpBd3d6ZEdZdGMyOWhibk10WVhOb1lYSmhieTVoY0hCekxtTXhMbTl3Wlc1emFHbG1kRFF1ZDJWaWJHOW5hV05yCk9ITXViM0puTUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FROEFNSUlCQ2dLQ0FRRUFvaStRQk5lenVSM04KMDMybUZpTWlvTitTVnA4NG1VTkhzaXlodnVlcjZGeFd2VFB0OEdHRk5ERXRSRG14akhrcWdKeHo1WDN2bEdsNApFL2FCZ1pZK1RjZlVDOENFa0I2STVpbHpKU0pmdEtGN21zUlZaTVpLQ0NSSjFkSTQ4citpNGYvYnJyVFJuZzMwCkRndHRlNjY3VS9mZHVhUTMzMXl2a205YzM5VVdRc09CcUp4ZlhNKzNmKzJBWEpsSkwrOG1tYjEzKzRJZzhPbVMKMXl4SU5xMW5iL0I5ajczWDhNRVVxQjBQU2Z1cnpYZ1lRS3VTOFdSdGJVOVU1VXY2eTZRMFl0ZUJCNjJsMUdMZApqd2JKQ0NLa0t4SDFLaTZqcjkrcnhYeG0rUWFOUjArS0drSzduS05qeURTdVBSeVp0RHB4SEZJV1pqR29pWUV0CmJZRTNDc2lpQlFJREFRQUJNQTBHQ1NxR1NJYjNEUUVCQ3dVQUE0SUJBUUI0NzVxN016emt2SVpHR1VIOTkwbU8KSDdLTzZ1NFRkam9aZEFTa1hvNVA4alVVWlpEeE1DZWNqMncwc0IxYTlYZlc4WVdqRUxjNVhGZGZRMTRvdElvTQpaZFdWeVBLd0RSL1U3THQ3ZEtobUFNanAyaVNqVDdzRTJ6d2V3dytzTjZ3UmZWQlJmbFBFSVdOU0QwdTI2WE12CkxTTmUyNnBJSlptZmtRWFR4RVNYVkFsbDN4bUgvcER6M25NVXkzbUowcjNyUkF5MUZzUkorOTR5aGhDMk4xdTYKR2VOdzV1TGNwRW5kNEJqRHk4WW1Hc2hhNjJvdVJmeHlCano0ZkY2RzRMS1JTcHhsUUt6eHNNcUo2QzZ1bjJxSApRV0ExaURmcVZDcmVOU1JVV3lZQmM5TDNrU0NKdzl5S3VmTUtVVXNDVWU4Z3pJVzRQKzJtbGJ5TkV0dTI2SXl5Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
 
 # The customer supplied private key to use for Apache webtier SSL configuration.
 # The value must be a string containing a base64 encoded key.
 # If 'virtualHostName' is set, the custom certificate and private key are not provided,
 # the default built-in auto-generated sample certificate and private key in the apache image will be used.
 # This parameter is ignored if 'virtualHostName' is not set.
-customKey:
+#customKey: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2UUlCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktjd2dnU2pBZ0VBQW9JQkFRQ2lMNUFFMTdPNUhjM1QKZmFZV0l5S2czNUpXbnppWlEwZXlMS0crNTZ2b1hGYTlNKzN3WVlVME1TMUVPYkdNZVNxQW5IUGxmZStVYVhnVAo5b0dCbGo1Tng5UUx3SVNRSG9qbUtYTWxJbCswb1h1YXhGVmt4a29JSkVuVjBqanl2NkxoLzl1dXROR2VEZlFPCkMyMTdycnRUOTkyNXBEZmZYSytTYjF6ZjFSWkN3NEdvbkY5Y3o3ZC83WUJjbVVrdjd5YVp2WGY3Z2lEdzZaTFgKTEVnMnJXZHY4SDJQdmRmd3dSU29IUTlKKzZ2TmVCaEFxNUx4WkcxdFQxVGxTL3JMcERSaTE0RUhyYVhVWXQyUApCc2tJSXFRckVmVXFMcU92MzZ2RmZHYjVCbzFIVDRvYVFydWNvMlBJTks0OUhKbTBPbkVjVWhabU1haUpnUzF0CmdUY0t5S0lGQWdNQkFBRUNnZ0VBS0E1TEtZY0Vra0cwSmZtd1hXTk1HQ05maHhsSDUwSmdvTGE1TStjUDVCRjYKTXJ4eWxaM2dRaVdySW1DRlkwWkJvd1lBOGJzS3dzTFJyMHlBYTdycHBGZ29ITWJ0ZHBLMENQUlB4ZW9aYlFrOAo5OXBwcEx2OGFNcGRtZnVUcVJCL2NBVzdBZ2tTaEZDNTZBWVdnaWVEaUpkOUlXNVhoa2pqNit5cEtYYjlTbnVOCjhWWlB6N0s0ZFJUZVFhZUMxOVd5YWFvbnhsWmNwTzRaWkVpdHVxQlpZcE5IeURrdDlPSnhURjVZRTU3OTNPR3oKS3BIQWFnMERDZmJJeEtmSXBEM3hxMjFVazdWbUZlNUh6cThaMURrVmp3djgrZFFDYllqbW5VaEdaUTBCSnVDNQpWdXBJUVlpVlQzTDkwZkNtQzh3TUl5NEZYb0loc1JEZVJrc2Q1QUgwZ1FLQmdRRFdQODVPbFZkZVh6YlJGTHR6CnFWM04yQXdHRkxFb0FiQXhWTlBQNVE0R3FDYlQ5VWpOZEVCYlBNRW9JZWhnRWgrT1c4UjVjOWk1YXpGckdkdzgKaFlFRGdrMlh6c3YyUDZwUjFsdzNRSklVZTFSRlNUOTNhb2thS3pwdjRpdU1LUDNGZEkrSHRBVWJZSFp4MStXOQpSNi9tTmQ3d0UxVHI1OTBLV1JaVUFlUnB0UUtCZ1FEQnluczc3T29RVUR4bm9CZTJtWUhIbXpBTDBRVDk4WTJjCjBFbFJZL2ZTVzNmakxwTnZ6YkpTSUkzb0V3MzlZWFF2TzFiWFFXdjlpYklSTjZSTHEzcGU4WktjSGk4d0xUNzAKbVVYUUFzd284VnA4NCt4NjZuZ2cxS01FbzNodlc5aWM5RmdGSUtBeTlVTFpsOUdMQnUvVWhVMzVITisxQlU0Nwo5THRMRGpWSkVRS0JnUUNESjRZczF3RW45Vk9DUkpYSDVSdFdZblpoMXBMb2NiZ2hTdE5yUmNZRFR6YU50RzcvCnpyV0M1THM5elJ3S2k2MmpvUXV5YWJkM01tYUxNTWFBaWgyRFAyWXVrMXFLZ1VqTFZsVVhRY0RySnVCY2xjMXoKVmRWZUhxNWtSV2p4SVRyUWdGMUk3bXZkNlh3NGpyakYyVGVWenM2TjJ0ZTJuamJUR2R3d1N3US9yUUtCZ0ExRQpsckZncEJuZjFITG4xQmZOWk1STXpMcFNZandjdUt4ZTJsWTNPUFZ2QzhOREloY0toMFgyTXFFTUJPNHZLT3crCjdOQXFDNEc5VnJLMUU0dVd2dmNYSlFtSlM0UEo1VUNMNmVxMjlsRnJUTjIySVMrOU0rSlRqS0c1cTNvOFdKVk8KYVdSWWVuOWlxV1FLYis5TDEwbStvcnNHamc1dndZNTdVQU53Z3BkeEFvR0FCTWJ5NmJiOUxpd1B3OHFTS1dGUwpNTW5HTGh5dUE1Tm1kNXI1OGhWeXJwb3hwc0EwTjAwNmY4SlExTU9HNndWQmUyR1pIZEhhWVVsWG0vNUhxUTM5CkRSUkcydjluMExOc0IrbmlsN3krQ0gzNmxIWElGbTk3TUJDYzJKTVRrSG1jVEVIUXNCNUtkTVlXb0JsQ0xqTjgKYXRLR2JmQXloMHJOMitCdTRxTUYydTg9Ci0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K 
 
 # Unique ID identifying a domain.
 # This ID must not contain an underscope ("_"), and must be lowercase and unique across all domains in a Kubernetes cluster.
-domainUID: "domain1"
+domainUID: "soainfra"
 
 # Cluster name
-clusterName: "cluster-1"
+clusterName: "soa_cluster"
 
 # Name of the admin server
-adminServerName: "admin-server"
+adminServerName: "adminserver"
 
 # Port number for admin server
 adminPort: 7001
@@ -73,5 +73,5 @@ managedServerPort: 8001
 # http://myhost:myport/weblogic/application_end_url
 # where 'myhost' is the IP of the machine that runs the Apache web tier, and 
 #       'myport' is the port that the Apache web tier is publicly exposed to.
-location: "/weblogic"
+#location: "/weblogic"
 
