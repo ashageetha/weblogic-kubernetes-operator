@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -27,6 +28,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 
 import io.kubernetes.client.openapi.models.V1EventList;
@@ -39,6 +43,7 @@ import io.kubernetes.client.openapi.models.V1ServiceList;
 import io.kubernetes.client.openapi.models.V1SubjectRulesReviewStatus;
 import io.kubernetes.client.util.Watch;
 import oracle.kubernetes.operator.calls.CallResponse;
+import oracle.kubernetes.operator.calls.FailureStatusSourceException;
 import oracle.kubernetes.operator.helpers.CallBuilder;
 import oracle.kubernetes.operator.helpers.CallBuilderFactory;
 import oracle.kubernetes.operator.helpers.ClientPool;
@@ -49,7 +54,9 @@ import oracle.kubernetes.operator.helpers.HealthCheckHelper;
 import oracle.kubernetes.operator.helpers.KubernetesVersion;
 import oracle.kubernetes.operator.helpers.PodHelper;
 import oracle.kubernetes.operator.helpers.ResponseStep;
+import oracle.kubernetes.operator.helpers.SemanticVersion;
 import oracle.kubernetes.operator.helpers.ServiceHelper;
+import oracle.kubernetes.operator.logging.LoggingContext;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
 import oracle.kubernetes.operator.logging.MessageKeys;
@@ -82,10 +89,9 @@ public class Main {
   private static final ThreadFactory threadFactory = new WrappedThreadFactory();
   private static final ScheduledExecutorService wrappedExecutorService =
       Engine.wrappedExecutorService("operator", container);
-  private static final TuningParameters tuningAndConfig;
   private static final CallBuilderFactory callBuilderFactory = new CallBuilderFactory();
   private static Map<String, NamespaceStatus> namespaceStatuses = new ConcurrentHashMap<>();
-  private static Map<String, AtomicBoolean> isNamespaceStopping = new ConcurrentHashMap<>();
+  private static Map<String, AtomicBoolean> namespaceStoppingMap = new ConcurrentHashMap<>();
   private static final Map<String, ConfigMapWatcher> configMapWatchers = new ConcurrentHashMap<>();
   private static final Map<String, DomainWatcher> domainWatchers = new ConcurrentHashMap<>();
   private static final Map<String, EventWatcher> eventWatchers = new ConcurrentHashMap<>();
@@ -104,6 +110,11 @@ public class Main {
   private static final Engine engine = new Engine(wrappedExecutorService);
   private static String principal;
   private static KubernetesVersion version = null;
+  private static SemanticVersion productVersion = null;
+
+  private static TuningParameters tuningAndConfig() {
+    return TuningParameters.getInstance();
+  }
 
   static {
     try {
@@ -115,7 +126,6 @@ public class Main {
       ClientPool.initialize(threadFactory);
 
       TuningParameters.initializeInstance(wrappedExecutorService, "/operator/config");
-      tuningAndConfig = TuningParameters.getInstance();
     } catch (IOException e) {
       LOGGER.warning(MessageKeys.EXCEPTION, e);
       throw new RuntimeException(e);
@@ -131,7 +141,7 @@ public class Main {
                 ScheduledExecutorService.class,
                 wrappedExecutorService,
                 TuningParameters.class,
-                tuningAndConfig,
+                tuningAndConfig(),
                 ThreadFactory.class,
                 threadFactory,
                 callBuilderFactory));
@@ -148,6 +158,9 @@ public class Main {
       buildProps.load(stream);
 
       String operatorVersion = buildProps.getProperty("git.build.version");
+      if (operatorVersion != null) {
+        productVersion = new SemanticVersion(operatorVersion);
+      }
       String operatorImpl =
           buildProps.getProperty("git.branch")
               + "."
@@ -175,27 +188,32 @@ public class Main {
 
   private static void begin() {
     String serviceAccountName =
-        Optional.ofNullable(tuningAndConfig.get("serviceaccount")).orElse("default");
+        Optional.ofNullable(tuningAndConfig().get("serviceaccount")).orElse("default");
     principal = "system:serviceaccount:" + operatorNamespace + ":" + serviceAccountName;
 
     LOGGER.info(MessageKeys.OP_CONFIG_NAMESPACE, operatorNamespace);
     JobWatcher.defineFactory(
-        threadFactory, tuningAndConfig.getWatchTuning(), Main::isNamespaceStopping);
+        threadFactory, tuningAndConfig().getWatchTuning(), Main::isNamespaceStopping);
 
-    Collection<String> targetNamespaces = getTargetNamespaces();
-    LOGGER.info(MessageKeys.OP_CONFIG_TARGET_NAMESPACES, StringUtils.join(targetNamespaces, ", "));
+    DomainNamespaceSelectionStrategy selectionStrategy = getDomainNamespaceSelectionStrategy();
+    Collection<String> configuredDomainNamespaces = selectionStrategy.getConfiguredList();
+    if (configuredDomainNamespaces != null) {
+      LOGGER.info(MessageKeys.OP_CONFIG_DOMAIN_NAMESPACES, StringUtils.join(configuredDomainNamespaces, ", "));
+    }
     LOGGER.info(MessageKeys.OP_CONFIG_SERVICE_ACCOUNT, serviceAccountName);
 
     try {
       version = HealthCheckHelper.performK8sVersionCheck();
 
       Step strategy = Step.chain(
-          new InitializeNamespacesSecurityStep(targetNamespaces),
-          new NamespaceRulesReviewStep(),
-          CrdHelper.createDomainCrdStep(version,
-              new StartNamespacesStep(targetNamespaces)));
-      if (!isDedicated()) {
-        strategy = Step.chain(strategy, readExistingNamespaces());
+          new InitializeNamespacesSecurityStep(configuredDomainNamespaces),
+          new NamespaceRulesReviewStep());
+      if (!DomainNamespaceSelectionStrategy.Dedicated.equals(selectionStrategy)) {
+        strategy = Step.chain(strategy, readExistingNamespaces(selectionStrategy, configuredDomainNamespaces, false));
+      } else {
+        strategy = Step.chain(strategy, CrdHelper.createDomainCrdStep(
+                version, productVersion,
+                new StartNamespacesStep(configuredDomainNamespaces, false)));
       }
       runSteps(
           strategy,
@@ -208,10 +226,10 @@ public class Main {
   private static void completeBegin() {
     try {
       // start the REST server
-      startRestServer(principal, isNamespaceStopping.keySet());
+      startRestServer(principal, namespaceStoppingMap.keySet());
 
       // start periodic retry and recheck
-      int recheckInterval = tuningAndConfig.getMainTuning().targetNamespaceRecheckIntervalSeconds;
+      int recheckInterval = tuningAndConfig().getMainTuning().domainNamespaceRecheckIntervalSeconds;
       engine
           .getExecutor()
           .scheduleWithFixedDelay(
@@ -228,14 +246,23 @@ public class Main {
     }
   }
 
-  private static void stopNamespace(String ns, boolean remove) {
-    processor.stopNamespace(ns);
-    AtomicBoolean stopping =
-        remove ? isNamespaceStopping.remove(ns) : isNamespaceStopping.get(ns);
+  private static void stopNamespace(String ns, boolean inDomainNamespaceList) {
+    AtomicBoolean isNamespaceStopping = isNamespaceStopping(ns);
 
-    if (stopping != null) {
-      stopping.set(true);
+    // Remove if namespace not in domainNamespace list
+    if (!inDomainNamespaceList) {
+      namespaceStoppingMap.remove(ns);
     }
+
+    // stop all Domains for namespace being stopped (not active)
+    if (isNamespaceStopping.get()) {
+      processor.stopNamespace(ns);
+    }
+
+    // set flag to indicate namespace is stopping.
+    isNamespaceStopping.set(true);
+
+    // unsubscribe from resource events for given namespace
     namespaceStatuses.remove(ns);
     domainWatchers.remove(ns);
     eventWatchers.remove(ns);
@@ -245,24 +272,32 @@ public class Main {
     JobWatcher.removeNamespace(ns);
   }
 
-  private static void stopNamespaces(Collection<String> targetNamespaces,
+  private static void stopNamespaces(Collection<String> domainNamespaces,
                                      Collection<String> namespacesToStop) {
     for (String ns : namespacesToStop) {
-      stopNamespace(ns, (! targetNamespaces.contains(ns)));
+      stopNamespace(ns, domainNamespaces.contains(ns));
     }
   }
 
   private static AtomicBoolean isNamespaceStopping(String ns) {
-    return isNamespaceStopping.computeIfAbsent(ns, (key) -> new AtomicBoolean(false));
+    return namespaceStoppingMap.computeIfAbsent(ns, (key) -> new AtomicBoolean(false));
+  }
+
+  private static void runSteps(Step firstStep, Packet packet) {
+    runSteps(firstStep, packet, null);
   }
 
   private static void runSteps(Step firstStep) {
-    runSteps(firstStep, null);
+    runSteps(firstStep, new Packet(), null);
   }
 
   private static void runSteps(Step firstStep, Runnable completionAction) {
+    runSteps(firstStep, new Packet(), completionAction);
+  }
+
+  private static void runSteps(Step firstStep, Packet packet, Runnable completionAction) {
     Fiber f = engine.createFiber();
-    f.start(firstStep, new Packet(), andThenDo(completionAction));
+    f.start(firstStep, packet, andThenDo(completionAction));
   }
 
   private static NullCompletionCallback andThenDo(Runnable completionAction) {
@@ -270,40 +305,33 @@ public class Main {
   }
 
   static Runnable recheckDomains() {
-    return () -> {
-      Collection<String> targetNamespaces = getTargetNamespaces();
+    return () -> runSteps(createDomainRecheckSteps(DateTime.now()));
+  }
 
-      // Check for namespaces that are removed from the operator's
-      // targetNamespaces list, or that are deleted from the Kubernetes cluster.
-      Set<String> namespacesToStop = new TreeSet<>(isNamespaceStopping.keySet());
-      for (String ns : targetNamespaces) {
-        // the active namespaces are the ones that will not be stopped
-        if (delegate.isNamespaceRunning(ns)) {
-          namespacesToStop.remove(ns);
-        }
-      }
-      stopNamespaces(targetNamespaces, namespacesToStop);
+  static Step createDomainRecheckSteps(DateTime now) {
+    DomainNamespaceSelectionStrategy selectionStrategy = getDomainNamespaceSelectionStrategy();
+    Collection<String> configuredDomainNamespaces = selectionStrategy.getConfiguredList();
 
-      Collection<String> namespacesToStart = targetNamespaces;
-      int recheckInterval = tuningAndConfig.getMainTuning().domainPresenceRecheckIntervalSeconds;
-      DateTime now = DateTime.now();
-      if (lastFullRecheck.get().plusSeconds(recheckInterval).isBefore(now)) {
-        lastFullRecheck.set(now);
-      } else {
-        // check for namespaces that need to be started
-        namespacesToStart = new TreeSet<>(targetNamespaces);
-        namespacesToStart.removeAll(namespaceStatuses.keySet());
-        for (String ns : targetNamespaces) {
-          if (namespacesToStop.contains(ns)) {
-            namespacesToStart.remove(ns);
-          }
-        }
-      }
+    int recheckInterval = tuningAndConfig().getMainTuning().domainPresenceRecheckIntervalSeconds;
+    boolean isFullRecheck = false;
+    if (lastFullRecheck.get().plusSeconds(recheckInterval).isBefore(now)) {
+      processor.reportSuspendedFibers();
+      isFullRecheck = true;
+      lastFullRecheck.set(now);
+    }
 
-      if (!namespacesToStart.isEmpty()) {
-        runSteps(new StartNamespacesStep(namespacesToStart));
-      }
-    };
+    Step strategy = Step.chain(
+        new InitializeNamespacesSecurityStep(configuredDomainNamespaces),
+        new NamespaceRulesReviewStep());
+    if (!DomainNamespaceSelectionStrategy.Dedicated.equals(selectionStrategy)) {
+      strategy = Step.chain(strategy, readExistingNamespaces(
+              selectionStrategy, configuredDomainNamespaces, isFullRecheck));
+    } else {
+      strategy = Step.chain(strategy, CrdHelper.createDomainCrdStep(
+          version, productVersion,
+          new StartNamespacesStep(configuredDomainNamespaces, isFullRecheck)));
+    }
+    return strategy;
   }
 
   static Step readExistingResources(String operatorNamespace, String ns) {
@@ -340,58 +368,131 @@ public class Main {
         .listPodAsync(ns, new PodListStep(ns));
   }
 
-  private static Step readExistingNamespaces() {
-    return new CallBuilder().listNamespaceAsync(new NamespaceListStep());
+  static Step readExistingNamespaces(DomainNamespaceSelectionStrategy selectionStrategy,
+                                             Collection<String> domainNamespaces,
+                                             boolean isFullRecheck) {
+    CallBuilder builder = new CallBuilder();
+    String selector = selectionStrategy.getLabelSelector();
+    if (selector != null) {
+      builder.withLabelSelectors(selector);
+    }
+    return builder.listNamespaceAsync(new NamespaceListStep(selectionStrategy, domainNamespaces, isFullRecheck));
   }
 
   private static ConfigMapAfterStep createConfigMapStep(String ns) {
     return new ConfigMapAfterStep(
         ns,
         configMapWatchers,
-        tuningAndConfig.getWatchTuning(),
+        tuningAndConfig().getWatchTuning(),
         isNamespaceStopping(ns),
         processor::dispatchConfigMapWatch);
   }
 
   /**
-   * Obtain the list of target namespaces.
+   * Obtain the list of domain namespaces.
    *
-   * @return the collection of target namespace names
+   * @return the collection of domain namespace names
    */
   @SuppressWarnings("SameParameterValue")
-  private static Collection<String> getTargetNamespaces(String tnValue, String namespace) {
-    Collection<String> targetNamespaces = new ArrayList<>();
+  private static Collection<String> getDomainNamespacesList(String tnValue, String namespace) {
+    Collection<String> domainNamespaces = new ArrayList<>();
 
     if (tnValue != null) {
       StringTokenizer st = new StringTokenizer(tnValue, ",");
       while (st.hasMoreTokens()) {
-        targetNamespaces.add(st.nextToken().trim());
+        domainNamespaces.add(st.nextToken().trim());
       }
     }
 
     // If no namespaces were found, default to the namespace of the operator
-    if (targetNamespaces.isEmpty()) {
-      targetNamespaces.add(namespace);
+    if (domainNamespaces.isEmpty()) {
+      domainNamespaces.add(namespace);
     }
 
-    return targetNamespaces;
+    return domainNamespaces;
   }
 
-  private static Collection<String> getTargetNamespaces() {
-    return isDedicated()
-        ? Collections.singleton(operatorNamespace)
-        : getTargetNamespaces(Optional.ofNullable(getHelmVariable.apply("OPERATOR_TARGET_NAMESPACES"))
-            .orElse(tuningAndConfig.get("targetNamespaces")), operatorNamespace);
+  enum DomainNamespaceSelectionStrategy {
+    List {
+      @Override
+      public Collection<String> getConfiguredList() {
+        return getDomainNamespacesList(Optional.ofNullable(getHelmVariable.apply("OPERATOR_DOMAIN_NAMESPACES"))
+            .orElse(Optional.ofNullable(tuningAndConfig().get("domainNamespaces"))
+                .orElse(tuningAndConfig().get("targetNamespaces"))), operatorNamespace);
+      }
+    },
+    LabelSelector {
+      @Override
+      public boolean isRequireList() {
+        return true;
+      }
+
+      @Override
+      public String getLabelSelector() {
+        return tuningAndConfig().get("domainNamespaceLabelSelector");
+      }
+    },
+    RegExp {
+      @Override
+      public boolean isRequireList() {
+        return true;
+      }
+
+      @Override
+      public String getRegExp() {
+        return tuningAndConfig().get("domainNamespaceRegExp");
+      }
+    },
+    Dedicated {
+      @Override
+      public Collection<String> getConfiguredList() {
+        return Collections.singleton(operatorNamespace);
+      }
+    };
+
+    public boolean isRequireList() {
+      return false;
+    }
+
+    public String getLabelSelector() {
+      return null;
+    }
+
+    public String getRegExp() {
+      return null;
+    }
+
+    public Collection<String> getConfiguredList() {
+      return null;
+    }
+  }
+
+  /**
+   * Gets the domain namespace selection strategy.
+   * @return Selection strategy
+   */
+  public static DomainNamespaceSelectionStrategy getDomainNamespaceSelectionStrategy() {
+    DomainNamespaceSelectionStrategy strategy =
+        Optional.ofNullable(tuningAndConfig().get("domainNamespaceSelectionStrategy"))
+        .map(DomainNamespaceSelectionStrategy::valueOf).orElse(DomainNamespaceSelectionStrategy.List);
+    if (DomainNamespaceSelectionStrategy.List.equals(strategy) && isDeprecatedDedicated()) {
+      return DomainNamespaceSelectionStrategy.Dedicated;
+    }
+    return strategy;
   }
 
   public static boolean isDedicated() {
-    return "true".equalsIgnoreCase(Optional.ofNullable(getHelmVariable.apply("OPERATOR_DEDICATED"))
-        .orElse(tuningAndConfig.get("dedicated")));
+    return DomainNamespaceSelectionStrategy.Dedicated.equals(getDomainNamespaceSelectionStrategy());
   }
 
-  private static void startRestServer(String principal, Collection<String> targetNamespaces)
+  private static boolean isDeprecatedDedicated() {
+    return "true".equalsIgnoreCase(Optional.ofNullable(getHelmVariable.apply("OPERATOR_DEDICATED"))
+        .orElse(Optional.ofNullable(tuningAndConfig().get("dedicated")).orElse("false")));
+  }
+
+  private static void startRestServer(String principal, Collection<String> domainNamespaces)
       throws Exception {
-    RestServer.create(new RestConfigImpl(principal, targetNamespaces));
+    RestServer.create(new RestConfigImpl(principal, domainNamespaces));
     RestServer.getInstance().start(container);
   }
 
@@ -428,7 +529,7 @@ public class Main {
       Thread.currentThread().interrupt();
     }
 
-    isNamespaceStopping.forEach((key, value) -> value.set(true));
+    namespaceStoppingMap.forEach((key, value) -> value.set(true));
   }
 
   private static EventWatcher createEventWatcher(String ns, String initialResourceVersion) {
@@ -437,7 +538,7 @@ public class Main {
         ns,
         READINESS_PROBE_FAILURE_EVENT_FILTER,
         initialResourceVersion,
-        tuningAndConfig.getWatchTuning(),
+        tuningAndConfig().getWatchTuning(),
         processor::dispatchEventWatch,
         isNamespaceStopping(ns));
   }
@@ -447,7 +548,7 @@ public class Main {
         threadFactory,
         ns,
         initialResourceVersion,
-        tuningAndConfig.getWatchTuning(),
+        tuningAndConfig().getWatchTuning(),
         processor::dispatchPodWatch,
         isNamespaceStopping(ns));
   }
@@ -457,7 +558,7 @@ public class Main {
         threadFactory,
         ns,
         initialResourceVersion,
-        tuningAndConfig.getWatchTuning(),
+        tuningAndConfig().getWatchTuning(),
         processor::dispatchServiceWatch,
         isNamespaceStopping(ns));
   }
@@ -467,16 +568,18 @@ public class Main {
         threadFactory,
         ns,
         initialResourceVersion,
-        tuningAndConfig.getWatchTuning(),
+        tuningAndConfig().getWatchTuning(),
         processor::dispatchDomainWatch,
         isNamespaceStopping(ns));
   }
 
-  private static NamespaceWatcher createNamespaceWatcher(String initialResourceVersion) {
+  private static NamespaceWatcher createNamespaceWatcher(DomainNamespaceSelectionStrategy selectionStrategy,
+                                                         String initialResourceVersion) {
     return NamespaceWatcher.create(
         threadFactory,
         initialResourceVersion,
-        tuningAndConfig.getWatchTuning(),
+        selectionStrategy.getLabelSelector(),
+        tuningAndConfig().getWatchTuning(),
         Main::dispatchNamespaceWatch,
         new AtomicBoolean(false));
   }
@@ -486,36 +589,47 @@ public class Main {
   }
 
   private static void dispatchNamespaceWatch(Watch.Response<V1Namespace> item) {
-    Collection<String> targetNamespaces = getTargetNamespaces();
     V1Namespace c = item.object;
     if (c != null) {
       String ns = c.getMetadata().getName();
 
-      // We only care about namespaces that are in our targetNamespaces
-      if (!targetNamespaces.contains(ns)) {
-        return;
-      }
-
       switch (item.type) {
         case "ADDED":
-          // We only create the domain config map when a namespace is added.
-          // The rest of the operations for standing up domains in a namespace
-          // will continue to be handled in recheckDomain method, which periodically
-          // checks for new domain resources in the target name spaces.
-          if (!delegate.isNamespaceRunning(ns)) {
-            runSteps(Step.chain(
-                ConfigMapHelper.createScriptConfigMapStep(operatorNamespace, ns),
-                createConfigMapStep(ns)));
-            isNamespaceStopping.put(ns, new AtomicBoolean(false));
+          DomainNamespaceSelectionStrategy selectionStrategy = getDomainNamespaceSelectionStrategy();
+          Collection<String> configuredDomainNamespaces = selectionStrategy.getConfiguredList();
+
+          // For selection strategies with a configured list, we only care about namespaces that are in that list
+          if (configuredDomainNamespaces != null && !configuredDomainNamespaces.contains(ns)) {
+            return;
           }
+
+          // For regexp strategy, we only care about namespaces that match the pattern
+          String regexp = selectionStrategy.getRegExp();
+          if (regexp != null) {
+            try {
+              if (!Pattern.compile(regexp).asPredicate().test(ns)) {
+                return;
+              }
+            } catch (PatternSyntaxException pse) {
+              LOGGER.severe(MessageKeys.EXCEPTION, pse);
+              return;
+            }
+          }
+
+          // For label strategy, we will only get watch events for namespaces that match the selector so
+          // no additional check is needed
+
+          Step strategy = new StartNamespacesStep(Collections.singletonList(ns), true);
+          if (!isNamespaceStopping(ns).getAndSet(false)) {
+            strategy = Step.chain(getScriptCreationSteps(ns), strategy);
+          }
+          runSteps(strategy, createPacketWithLoggingContext(ns));
           break;
 
         case "DELETED":
           // Mark the namespace as isStopping, which will cause the namespace be stopped
           // the next time when recheckDomains is triggered
-          if (delegate.isNamespaceRunning(ns)) {
-            isNamespaceStopping.put(ns, new AtomicBoolean(true));
-          }
+          isNamespaceStopping(ns).set(true);
 
           break;
 
@@ -523,6 +637,21 @@ public class Main {
         case "ERROR":
         default:
       }
+    }
+  }
+
+  private static Packet createPacketWithLoggingContext(String ns) {
+    Packet packet = new Packet();
+    packet.getComponents().put(
+        LoggingContext.LOGGING_CONTEXT_KEY,
+        Component.createFor(new LoggingContext().namespace(ns)));
+    return packet;
+  }
+
+  private static Step getScriptCreationSteps(String ns) {
+    try (LoggingContext stack = LoggingContext.setThreadContext().namespace(ns)) {
+      return Step.chain(
+          ConfigMapHelper.createScriptConfigMapStep(operatorNamespace, ns), createConfigMapStep(ns));
     }
   }
 
@@ -540,15 +669,20 @@ public class Main {
   }
 
   private abstract static class ForEachNamespaceStep extends Step {
-    private final Collection<String> targetNamespaces;
+    private final Collection<String> domainNamespaces;
 
-    ForEachNamespaceStep(Collection<String> targetNamespaces) {
-      this.targetNamespaces = targetNamespaces;
+    ForEachNamespaceStep(Collection<String> domainNamespaces) {
+      this(domainNamespaces, null);
+    }
+
+    ForEachNamespaceStep(Collection<String> domainNamespaces, Step next) {
+      super(next);
+      this.domainNamespaces = domainNamespaces;
     }
 
     @Override
     protected String getDetail() {
-      return String.join(",", targetNamespaces);
+      return String.join(",", domainNamespaces);
     }
 
     protected abstract Step action(String ns);
@@ -557,42 +691,50 @@ public class Main {
     public NextAction apply(Packet packet) {
       // check for any existing resources and add the watches on them
       // this would happen when the Domain was running BEFORE the Operator starts up
-      Collection<StepAndPacket> startDetails = new ArrayList<>();
-      for (String ns : targetNamespaces) {
-        startDetails.add(
-            new StepAndPacket(
-                action(ns),
-                packet.clone()));
+      if (domainNamespaces != null) {
+        Collection<StepAndPacket> startDetails = new ArrayList<>();
+
+        for (String ns : domainNamespaces) {
+          try (LoggingContext stack = LoggingContext.setThreadContext().namespace(ns)) {
+            startDetails.add(new StepAndPacket(action(ns), packet.clone()));
+          }
+        }
+        return doForkJoin(getNext(), packet, startDetails);
       }
-      return doForkJoin(getNext(), packet, startDetails);
+      return doNext(packet);
     }
   }
 
   private static class StartNamespacesStep extends ForEachNamespaceStep {
-    StartNamespacesStep(Collection<String> targetNamespaces) {
-      super(targetNamespaces);
+    private final boolean isFullRecheck;
+
+    StartNamespacesStep(Collection<String> domainNamespaces, boolean isFullRecheck) {
+      super(domainNamespaces);
+      this.isFullRecheck = isFullRecheck;
     }
 
     @Override
     protected Step action(String ns) {
       return Step.chain(
           new NamespaceRulesReviewStep(ns),
-          new StartNamespaceBeforeStep(ns),
+          new StartNamespaceBeforeStep(ns, isFullRecheck),
           readExistingResources(operatorNamespace, ns));
     }
   }
 
   private static class StartNamespaceBeforeStep extends Step {
     private final String ns;
+    private final boolean isFullRecheck;
 
-    StartNamespaceBeforeStep(String ns) {
+    StartNamespaceBeforeStep(String ns, boolean isFullRecheck) {
       this.ns = ns;
+      this.isFullRecheck = isFullRecheck;
     }
 
     @Override
     public NextAction apply(Packet packet) {
       NamespaceStatus nss = namespaceStatuses.computeIfAbsent(ns, (key) -> new NamespaceStatus());
-      if (!nss.isNamespaceStarting().getAndSet(true)) {
+      if (isFullRecheck || !nss.isNamespaceStarting().getAndSet(true)) {
         return doNext(packet);
       }
       return doEnd(packet);
@@ -600,8 +742,12 @@ public class Main {
   }
 
   private static class InitializeNamespacesSecurityStep extends ForEachNamespaceStep {
-    InitializeNamespacesSecurityStep(Collection<String> targetNamespaces) {
-      super(targetNamespaces);
+    InitializeNamespacesSecurityStep(Collection<String> domainNamespaces) {
+      this(domainNamespaces, null);
+    }
+
+    InitializeNamespacesSecurityStep(Collection<String> domainNamespaces, Step next) {
+      super(domainNamespaces, next);
     }
 
     @Override
@@ -623,11 +769,20 @@ public class Main {
 
     @Override
     public NextAction apply(Packet packet) {
-      // Looking up namespace status.  If ns is null, then this step will check the status of the
-      // operator's own namespace.  If the namespace status is missing, then generate it with
+      // Looking up namespace status. If ns is null, then this step will check the status of the
+      // operator's own namespace. If the namespace status is missing, then generate it with
       // the health check helper.
       NamespaceStatus nss = namespaceStatuses.computeIfAbsent(
           ns != null ? ns : operatorNamespace, (key) -> new NamespaceStatus());
+
+      // we don't have the domain presence information yet
+      // we add a logging context to pass the namespace information to the LoggingFormatter
+      if (ns != null) {
+        packet.getComponents().put(
+            LoggingContext.LOGGING_CONTEXT_KEY,
+            Component.createFor(new LoggingContext().namespace(ns)));
+      }
+
       V1SubjectRulesReviewStatus srrs = nss.getRulesReviewStatus().updateAndGet(prev -> {
         if (prev != null) {
           return prev;
@@ -696,17 +851,21 @@ public class Main {
                     return v;
                   });
           info.setPopulated(true);
-          dp.makeRightDomainPresence(info, true, false, false);
+          try (LoggingContext stack = LoggingContext.setThreadContext().namespace(ns).domainUid(domainUid)) {
+            dp.createMakeRightOperation(info).withExplicitRecheck().execute();
+          }
         }
       }
 
       dpis.forEach(
-          (key, value) -> {
-            if (!domainUids.contains(key)) {
+          (uid, info) -> {
+            if (!domainUids.contains(uid)) {
               // This is a stranded DomainPresenceInfo.
-              value.setDeleting(true);
-              value.setPopulated(true);
-              dp.makeRightDomainPresence(value, true, true, false);
+              info.setDeleting(true);
+              info.setPopulated(true);
+              try (LoggingContext stack = LoggingContext.setThreadContext().namespace(ns).domainUid(uid)) {
+                dp.createMakeRightOperation(info).withExplicitRecheck().forDeletion().execute();
+              }
             }
           });
 
@@ -840,6 +999,18 @@ public class Main {
   }
 
   private static class NamespaceListStep extends ResponseStep<V1NamespaceList> {
+    private final DomainNamespaceSelectionStrategy selectionStrategy;
+    private final Collection<String> configuredDomainNamespaces;
+    private final boolean isFullRecheck;
+
+    NamespaceListStep(DomainNamespaceSelectionStrategy selectionStrategy,
+                      Collection<String> configuredDomainNamespaces,
+                      boolean isFullRecheck) {
+      this.selectionStrategy = selectionStrategy;
+      this.configuredDomainNamespaces = configuredDomainNamespaces;
+      this.isFullRecheck = isFullRecheck;
+    }
+
     @Override
     public NextAction onFailure(Packet packet, CallResponse<V1NamespaceList> callResponse) {
       return callResponse.getStatusCode() == CallBuilder.NOT_FOUND
@@ -849,25 +1020,107 @@ public class Main {
 
     @Override
     protected NextAction onFailureNoRetry(Packet packet, CallResponse<V1NamespaceList> callResponse) {
-      return isNotAuthorizedOrForbidden(callResponse)
-          ? doNext(packet) : super.onFailureNoRetry(packet, callResponse);
+      return !selectionStrategy.isRequireList() && isNotAuthorizedOrForbidden(callResponse)
+          ? doNext(createDomainCrdAndStartNamespaces(configuredDomainNamespaces, isFullRecheck), packet) :
+            super.onFailureNoRetry(packet, callResponse);
     }
 
     @Override
     public NextAction onSuccess(Packet packet, CallResponse<V1NamespaceList> callResponse) {
       V1NamespaceList result = callResponse.getResult();
       // don't bother processing pre-existing events
-
-      if (namespaceWatcher == null) {
-        namespaceWatcher = createNamespaceWatcher(getInitialResourceVersion(result));
+      String intialResourceVersion = getInitialResourceVersion(result);
+      List<String> nsList = getExistingNamespaces(result);
+      
+      Set<String> namespacesToStart;
+      if (selectionStrategy.isRequireList()) {
+        namespacesToStart = new TreeSet<>(nsList);
+        String regexp = selectionStrategy.getRegExp();
+        if (regexp != null) {
+          try {
+            namespacesToStart = namespacesToStart.stream().filter(
+                    Pattern.compile(regexp).asPredicate()).collect(Collectors.toSet());
+          } catch (PatternSyntaxException pse) {
+            LOGGER.severe(MessageKeys.EXCEPTION, pse);
+          }
+        }
+      } else {
+        namespacesToStart = new TreeSet<>(configuredDomainNamespaces);
+        for (String ns : configuredDomainNamespaces) {
+          if (!nsList.contains(ns)) {
+            try (LoggingContext stack = LoggingContext.setThreadContext().namespace(ns)) {
+              LOGGER.warning(MessageKeys.NAMESPACE_IS_MISSING, ns);
+            }
+            namespacesToStart.remove(ns);
+          }
+        }
       }
-      return doNext(packet);
+      Step strategy = null;
+      if (!namespacesToStart.isEmpty()) {
+        strategy = Step.chain(createDomainCrdAndStartNamespaces(namespacesToStart, isFullRecheck),
+          new CreateNamespaceWatcherStep(selectionStrategy, intialResourceVersion));
+
+        if (configuredDomainNamespaces == null) {
+          strategy = new InitializeNamespacesSecurityStep(namespacesToStart, strategy);
+        }
+      } else {
+        strategy = CrdHelper.createDomainCrdStep(
+          version, productVersion,
+            new CreateNamespaceWatcherStep(selectionStrategy, intialResourceVersion));
+      }
+
+      // Check for namespaces that are removed from the operator's
+      // domainNamespaces list, or that are deleted from the Kubernetes cluster.
+      Set<String> namespacesToStop = new TreeSet<>(namespaceStoppingMap.keySet());
+      for (String ns : namespacesToStart) {
+        // the active namespaces are the ones that will not be stopped
+        if (delegate.isNamespaceRunning(ns)) {
+          namespacesToStop.remove(ns);
+        }
+      }
+      stopNamespaces(namespacesToStart, namespacesToStop);
+
+      return doNext(strategy, packet);
+    }
+    
+    private Step createDomainCrdAndStartNamespaces(Collection<String> namespacesToStart, boolean isFullRecheck) {
+      return CrdHelper.createDomainCrdStep(
+          version, productVersion,
+            new StartNamespacesStep(namespacesToStart, isFullRecheck));
     }
 
     private String getInitialResourceVersion(V1NamespaceList result) {
       return result != null ? result.getMetadata().getResourceVersion() : "";
     }
+    
+    private List<String> getExistingNamespaces(V1NamespaceList result) {
+      List<String> namespaces = new ArrayList<>();
+      if (result != null) {
+        for (V1Namespace ns:result.getItems()) {
+          namespaces.add(ns.getMetadata().getName());
+        }
+      }
+      return namespaces;
+    }
   }
+  
+  private static class CreateNamespaceWatcherStep extends Step {
+    private final DomainNamespaceSelectionStrategy selectionStrategy;
+    private final String initialResourceVersion;
+
+    CreateNamespaceWatcherStep(DomainNamespaceSelectionStrategy selectionStrategy, String initialResourceVersion) {
+      this.selectionStrategy = selectionStrategy;
+      this.initialResourceVersion = initialResourceVersion;
+    }
+
+    @Override
+    public NextAction apply(Packet packet) {
+      if (namespaceWatcher == null) {
+        namespaceWatcher = createNamespaceWatcher(selectionStrategy, initialResourceVersion);
+      }
+      return doNext(packet);
+    }
+  }  
 
   private static class NullCompletionCallback implements CompletionCallback {
     private final Runnable completionAction;
@@ -885,7 +1138,11 @@ public class Main {
 
     @Override
     public void onThrowable(Packet packet, Throwable throwable) {
-      LOGGER.severe(MessageKeys.EXCEPTION, throwable);
+      if (throwable instanceof FailureStatusSourceException) {
+        ((FailureStatusSourceException) throwable).log();
+      } else {
+        LOGGER.severe(MessageKeys.EXCEPTION, throwable);
+      }
     }
   }
 
@@ -910,14 +1167,17 @@ public class Main {
     @Override
     public boolean isNamespaceRunning(String namespace) {
       // make sure the map entry is initialized the value to "false" if absent
-      isNamespaceStopping(namespace);
-
-      return !isNamespaceStopping.get(namespace).get();
+      return !isNamespaceStopping(namespace).get();
     }
 
     @Override
     public KubernetesVersion getVersion() {
       return version;
+    }
+
+    @Override
+    public SemanticVersion getProductVersion() {
+      return productVersion;
     }
 
     @Override

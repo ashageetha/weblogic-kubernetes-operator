@@ -8,7 +8,7 @@ description: "The Oracle WebLogic Server Kubernetes Operator (the “operator”
 
 The Oracle WebLogic Server Kubernetes Operator (the “operator”) is designed to fulfill a similar role to that which a human operator would fill in a traditional data center deployment.  It contains a set of useful built-in knowledge about how to perform various life cycle operations on a domain correctly.
 
-Human operators are normally responsible for starting and stopping environments, initiating backups, performing scaling operations, performing manual tasks associated with disaster recovery and high availability needs and coordinating actions with other operators in other data centers.  It is envisaged that the operator will have similar responsibilities in a Kubernetes environment.
+Human operators are typically responsible for starting and stopping environments, initiating backups, performing scaling operations, performing manual tasks associated with disaster recovery and high availability needs and coordinating actions with other operators in other data centers.  It is envisaged that the operator will have similar responsibilities in a Kubernetes environment.
 
 It is important to note the distinction between an *operator* and an *administrator*.  A WebLogic Server administrator typically has different responsibilities centered around managing the detailed configuration of the WebLogic domains.  The operator has only limited interest in the domain configuration, with its main concern being the high-level topology of the domain; for example, how many clusters and servers, and information about network access points, such as channels.
 
@@ -18,16 +18,16 @@ Like a human operator, the operator is designed to be event-based.  It waits for
 
 The operator is designed with security in mind from the outset.  Some examples of the specific security practices we follow are:
 
-*	During the deployment of the operator, Kubernetes roles are defined and assigned to the operator.  These roles are designed to give the operator the minimum amount of privileges that it requires to perform its tasks.
+*	During the deployment of the operator, Kubernetes Roles are defined and assigned to the operator.  These roles are designed to give the operator the minimum amount of privileges that it requires to perform its tasks.
 *	The code base is regularly scanned with security auditing tools and any issues that are identified are promptly resolved.
-*	All HTTP communications – between the operator and an external client, between the operator and WebLogic Administration Servers, and so on – are configured to require SSL and TLS 1.2.
+*	All HTTP communications – between the operator and an external client, between the operator and WebLogic Server Administration Servers, and so on – are configured to require SSL and TLS 1.2.
 *	Unused code is pruned from the code base regularly.
 *	Dependencies are kept as up-to-date as possible and are regularly reviewed for security vulnerabilities.
 
 The operator is designed to avoid imposing any arbitrary restriction on how WebLogic Server may be configured or used in Kubernetes.  Where there are restrictions, these are based on the availability of some specific feature in Kubernetes; for example, multicast support.
 
-The operator learns of WebLogic domains through instances of a domain Kubernetes resource.  When the operator is installed, it creates a Kubernetes [Custom Resource Definition](https://kubernetes.io/docs/concepts/api-extension/custom-resources/).  This custom resource definition defines the domain resource type.  After this type is defined, you can manage domain resources using `kubectl` just like any other resource type.  For instance, `kubectl get domain` or `kubectl edit domain domain1`.  
+The operator learns of WebLogic domains through instances of a domain Kubernetes resource.  When the operator is installed, it creates a Kubernetes [Custom Resource Definition](https://kubernetes.io/docs/concepts/api-extension/custom-resources/).  This custom resource definition defines the Domain type.  After this type is defined, you can manage Domains using `kubectl` just like any other resource type.  For instance, `kubectl get domain` or `kubectl edit domain domain1`.  
 
-Schema for domain resources is [here](https://oracle.github.io/weblogic-kubernetes-operator/domains/Domain.json).
+Schema for Domains is [here](https://oracle.github.io/weblogic-kubernetes-operator/domains/Domain.json).
 
-The schema for the domain resource is designed to be as sparse as possible.  It includes the connection details for the Administration Server, but all of the other content is operational details about which servers should be started, environment variables, and details about what should be exposed outside the Kubernetes cluster.  This way, the WebLogic domain's configuration remains the normative configuration.
+The schema for the Domain type is designed to be as sparse as possible.  It includes the connection details for the Administration Server, but all of the other content is operational details about which servers should be started, environment variables, and details about what should be exposed outside the Kubernetes cluster.  This way, the WebLogic domain's configuration remains the normative configuration.

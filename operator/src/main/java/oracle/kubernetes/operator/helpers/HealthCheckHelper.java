@@ -108,8 +108,8 @@ public final class HealthCheckHelper {
    *
    * @param version Kubernetes version
    * @param operatorNamespace operator namespace
-   * @param namespace target namespace
-   * @return self subject rules review for the target namespace
+   * @param namespace domain namespace
+   * @return self subject rules review for the domain namespace
    */
   public static V1SubjectRulesReviewStatus performSecurityChecks(
       KubernetesVersion version, String operatorNamespace, String namespace) {
@@ -117,29 +117,32 @@ public final class HealthCheckHelper {
 
     // Validate namespace
     if (DEFAULT_NAMESPACE.equals(operatorNamespace)) {
-      LOGGER.info(MessageKeys.NAMESPACE_IS_DEFAULT);
+      LOGGER.fine(MessageKeys.NAMESPACE_IS_DEFAULT);
     }
 
     // Validate policies allow service account to perform required operations
     AuthorizationProxy ap = new AuthorizationProxy();
-    LOGGER.info(MessageKeys.VERIFY_ACCESS_START, ns);
+    LOGGER.fine(MessageKeys.VERIFY_ACCESS_START, ns);
 
     V1SelfSubjectRulesReview review = ap.review(ns);
     if (review != null) {
       V1SubjectRulesReviewStatus status = review.getStatus();
-      List<V1ResourceRule> rules = status.getResourceRules();
 
-      if (namespace != null) {
-        for (Resource r : namespaceAccessChecks.keySet()) {
-          for (Operation op : namespaceAccessChecks.get(r)) {
-            check(rules, r, op, namespace);
+      if (status != null) {
+        List<V1ResourceRule> rules = status.getResourceRules();
+
+        if (namespace != null) {
+          for (Resource r : namespaceAccessChecks.keySet()) {
+            for (Operation op : namespaceAccessChecks.get(r)) {
+              check(rules, r, op, namespace);
+            }
           }
         }
-      }
-      if (!Main.isDedicated() && operatorNamespace.equals(ns)) {
-        for (Resource r : clusterAccessChecks.keySet()) {
-          for (Operation op : clusterAccessChecks.get(r)) {
-            check(rules, r, op, ns);
+        if (!Main.isDedicated() && operatorNamespace.equals(ns)) {
+          for (Resource r : clusterAccessChecks.keySet()) {
+            for (Operation op : clusterAccessChecks.get(r)) {
+              check(rules, r, op, ns);
+            }
           }
         }
       }
@@ -202,7 +205,7 @@ public final class HealthCheckHelper {
    * @return Major and minor version information
    */
   public static KubernetesVersion performK8sVersionCheck() {
-    LOGGER.info(MessageKeys.VERIFY_K8S_MIN_VERSION);
+    LOGGER.fine(MessageKeys.VERIFY_K8S_MIN_VERSION);
 
     try {
       return createAndValidateKubernetesVersion(new CallBuilder().readVersionCode());

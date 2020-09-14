@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 
@@ -31,6 +32,7 @@ import io.kubernetes.client.openapi.models.V1Lifecycle;
 import io.kubernetes.client.openapi.models.V1LocalObjectReference;
 import io.kubernetes.client.openapi.models.V1ObjectFieldSelector;
 import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.openapi.models.V1OwnerReference;
 import io.kubernetes.client.openapi.models.V1Pod;
 import io.kubernetes.client.openapi.models.V1PodAffinity;
 import io.kubernetes.client.openapi.models.V1PodAffinityTerm;
@@ -45,17 +47,22 @@ import io.kubernetes.client.openapi.models.V1Toleration;
 import io.kubernetes.client.openapi.models.V1Volume;
 import io.kubernetes.client.openapi.models.V1VolumeMount;
 import io.kubernetes.client.openapi.models.V1WeightedPodAffinityTerm;
+import oracle.kubernetes.operator.DomainSourceType;
+import oracle.kubernetes.operator.IntrospectorConfigMapKeys;
+import oracle.kubernetes.operator.KubernetesConstants;
 import oracle.kubernetes.operator.LabelConstants;
+import oracle.kubernetes.operator.MakeRightDomainOperation;
+import oracle.kubernetes.operator.OverrideDistributionStrategy;
 import oracle.kubernetes.operator.PodAwaiterStepFactory;
 import oracle.kubernetes.operator.ProcessingConstants;
-import oracle.kubernetes.operator.VersionConstants;
-import oracle.kubernetes.operator.calls.unprocessable.UnprocessableEntityBuilder;
+import oracle.kubernetes.operator.calls.unprocessable.UnrecoverableErrorBuilderImpl;
 import oracle.kubernetes.operator.utils.InMemoryCertificates;
 import oracle.kubernetes.operator.utils.WlsDomainConfigSupport;
 import oracle.kubernetes.operator.wlsconfig.NetworkAccessPoint;
 import oracle.kubernetes.operator.wlsconfig.WlsDomainConfig;
 import oracle.kubernetes.operator.wlsconfig.WlsServerConfig;
 import oracle.kubernetes.operator.work.FiberTestSupport;
+import oracle.kubernetes.operator.work.NextAction;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step;
 import oracle.kubernetes.operator.work.TerminalStep;
@@ -72,12 +79,13 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 import static com.meterware.simplestub.Stub.createStrictStub;
+import static com.meterware.simplestub.Stub.createStub;
 import static oracle.kubernetes.operator.KubernetesConstants.ALWAYS_IMAGEPULLPOLICY;
 import static oracle.kubernetes.operator.KubernetesConstants.CONTAINER_NAME;
 import static oracle.kubernetes.operator.KubernetesConstants.DEFAULT_IMAGE;
-import static oracle.kubernetes.operator.KubernetesConstants.DOMAIN_CONFIG_MAP_NAME;
 import static oracle.kubernetes.operator.KubernetesConstants.IFNOTPRESENT_IMAGEPULLPOLICY;
-import static oracle.kubernetes.operator.LabelConstants.RESOURCE_VERSION_LABEL;
+import static oracle.kubernetes.operator.KubernetesConstants.SCRIPT_CONFIG_MAP_NAME;
+import static oracle.kubernetes.operator.ProcessingConstants.MAKE_RIGHT_DOMAIN_OPERATION;
 import static oracle.kubernetes.operator.ProcessingConstants.SERVER_SCAN;
 import static oracle.kubernetes.operator.helpers.AnnotationHelper.SHA256_ANNOTATION;
 import static oracle.kubernetes.operator.helpers.DomainStatusMatcher.hasStatus;
@@ -91,7 +99,9 @@ import static oracle.kubernetes.operator.helpers.Matchers.hasPvClaimVolume;
 import static oracle.kubernetes.operator.helpers.Matchers.hasResourceQuantity;
 import static oracle.kubernetes.operator.helpers.Matchers.hasVolume;
 import static oracle.kubernetes.operator.helpers.Matchers.hasVolumeMount;
-import static oracle.kubernetes.operator.helpers.StepContextConstants.SIT_CONFIG_MAP_VOLUME_SUFFIX;
+import static oracle.kubernetes.operator.helpers.StepContextConstants.RUNTIME_ENCRYPTION_SECRET_MOUNT_PATH;
+import static oracle.kubernetes.operator.helpers.StepContextConstants.RUNTIME_ENCRYPTION_SECRET_VOLUME;
+import static oracle.kubernetes.operator.helpers.StepContextConstants.SIT_CONFIG_MAP_VOLUME;
 import static oracle.kubernetes.operator.helpers.TuningParametersStub.LIVENESS_INITIAL_DELAY;
 import static oracle.kubernetes.operator.helpers.TuningParametersStub.LIVENESS_PERIOD;
 import static oracle.kubernetes.operator.helpers.TuningParametersStub.LIVENESS_TIMEOUT;
@@ -120,8 +130,9 @@ public abstract class PodHelperTestBase {
   static final String NS = "namespace";
   static final String ADMIN_SERVER = "ADMIN_SERVER";
   static final Integer ADMIN_PORT = 7001;
-  private static final String DOMAIN_NAME = "domain1";
+  protected static final String DOMAIN_NAME = "domain1";
   protected static final String UID = "uid1";
+  protected static final String KUBERNETES_UID = "12345";
   private static final boolean INCLUDE_SERVER_OUT_IN_POD_LOG = true;
 
   private static final String CREDENTIALS_SECRET_NAME = "webLogicCredentialsSecretName";
@@ -133,7 +144,7 @@ public abstract class PodHelperTestBase {
   private static final int CONFIGURED_PERIOD = 35;
   private static final String LOG_HOME = "/shared/logs";
   private static final String NODEMGR_HOME = "/u01/nodemanager";
-  private static final String CONFIGMAP_VOLUME_NAME = "weblogic-domain-cm-volume";
+  private static final String CONFIGMAP_VOLUME_NAME = "weblogic-scripts-cm-volume";
   private static final int READ_AND_EXECUTE_MODE = 0555;
 
   final TerminalStep terminalStep = new TerminalStep();
@@ -144,9 +155,9 @@ public abstract class PodHelperTestBase {
   protected List<LogRecord> logRecords = new ArrayList<>();
   RetryStrategyStub retryStrategy = createStrictStub(RetryStrategyStub.class);
   private Method getDomainSpec;
-  private DomainConfigurator configurator = DomainConfiguratorFactory.forDomain(domain);
-  private String serverName;
-  private int listenPort;
+  private final DomainConfigurator configurator = DomainConfiguratorFactory.forDomain(domain);
+  private final String serverName;
+  private final int listenPort;
   private WlsDomainConfig domainTopology;
   protected final V1PodSecurityContext podSecurityContext = createPodSecurityContext(123L);
   protected final V1SecurityContext containerSecurityContext = createSecurityContext(222L);
@@ -195,7 +206,8 @@ public abstract class PodHelperTestBase {
     mementos.add(
         TestUtils.silenceOperatorLogger()
             .collectLogMessages(logRecords, getMessageKeys())
-            .withLogLevel(Level.FINE));
+            .withLogLevel(Level.FINE)
+            .ignoringLoggedExceptions(ApiException.class));
     mementos.add(testSupport.install());
     mementos.add(TuningParametersStub.install());
     mementos.add(UnitTestHash.install());
@@ -252,7 +264,11 @@ public abstract class PodHelperTestBase {
   abstract void setServerPort(int port);
 
   private Domain createDomain() {
-    return new Domain().withMetadata(new V1ObjectMeta().namespace(NS).name(DOMAIN_NAME)).withSpec(createDomainSpec());
+    return new Domain()
+        .withApiVersion(KubernetesConstants.DOMAIN_VERSION)
+        .withKind(KubernetesConstants.DOMAIN)
+        .withMetadata(new V1ObjectMeta().namespace(NS).name(DOMAIN_NAME).uid(KUBERNETES_UID))
+        .withSpec(createDomainSpec());
   }
 
   private DomainSpec createDomainSpec() {
@@ -336,14 +352,46 @@ public abstract class PodHelperTestBase {
   }
 
   @Test
-  public void whenPodCreated_withNoPvc_containerHasExpectedVolumeMounts() {
+  public void whenPodCreated_withNoPvc_image_containerHasExpectedVolumeMounts() {
+    configurator.withDomainHomeSourceType(DomainSourceType.Image);
     assertThat(
         getCreatedPodSpecContainer().getVolumeMounts(),
         containsInAnyOrder(
             writableVolumeMount(
-                UID + SIT_CONFIG_MAP_VOLUME_SUFFIX, "/weblogic-operator/introspector"),
+                SIT_CONFIG_MAP_VOLUME, "/weblogic-operator/introspector"),
             readOnlyVolumeMount("weblogic-domain-debug-cm-volume", "/weblogic-operator/debug"),
-            readOnlyVolumeMount("weblogic-domain-cm-volume", "/weblogic-operator/scripts")));
+            readOnlyVolumeMount("weblogic-scripts-cm-volume", "/weblogic-operator/scripts")));
+  }
+
+  @Test
+  public void whenPodCreated_withNoPvc_fromModel_containerHasExpectedVolumeMounts() {
+    reportInspectionWasRun();
+    configurator.withDomainHomeSourceType(DomainSourceType.FromModel)
+        .withRuntimeEncryptionSecret("my-runtime-encryption-secret");
+    assertThat(
+        getCreatedPodSpecContainer().getVolumeMounts(),
+        containsInAnyOrder(
+            writableVolumeMount(
+                SIT_CONFIG_MAP_VOLUME, "/weblogic-operator/introspector"),
+            readOnlyVolumeMount("weblogic-domain-debug-cm-volume", "/weblogic-operator/debug"),
+            readOnlyVolumeMount("weblogic-scripts-cm-volume", "/weblogic-operator/scripts"),
+            readOnlyVolumeMount(RUNTIME_ENCRYPTION_SECRET_VOLUME,
+                RUNTIME_ENCRYPTION_SECRET_MOUNT_PATH))); 
+  }
+
+  public void reportInspectionWasRun() {
+    testSupport.addToPacket(MAKE_RIGHT_DOMAIN_OPERATION, reportIntrospectionRun());
+  }
+
+  private MakeRightDomainOperation reportIntrospectionRun() {
+    return createStub(InspectionWasRun.class);
+  }
+
+  abstract static class InspectionWasRun implements MakeRightDomainOperation {
+    @Override
+    public boolean wasInspectionRun() {
+      return true;
+    }
   }
 
   @Test
@@ -399,6 +447,29 @@ public abstract class PodHelperTestBase {
   }
 
   @Test
+  public void whenPodCreatedWithOnRestartDistribution_dontAddDynamicUpdateEnvVar() {
+    configureDomain().withConfigOverrideDistributionStrategy(OverrideDistributionStrategy.ON_RESTART);
+
+    assertThat(getCreatedPodSpecContainer().getEnv(), not(hasEnvVar("DYNAMIC_CONFIG_OVERRIDE")));
+  }
+
+  @Test
+  public void whenPodCreatedWithDynamicDistribution_addDynamicUpdateEnvVar() {
+    configureDomain().withConfigOverrideDistributionStrategy(OverrideDistributionStrategy.DYNAMIC);
+
+    assertThat(getCreatedPodSpecContainer().getEnv(), hasEnvVar("DYNAMIC_CONFIG_OVERRIDE"));
+  }
+
+  @Test
+  public void whenDistributionStrategyModified_dontReplacePod() {
+    configureDomain().withConfigOverrideDistributionStrategy(OverrideDistributionStrategy.DYNAMIC);
+    initializeExistingPod();
+
+    configureDomain().withConfigOverrideDistributionStrategy(OverrideDistributionStrategy.ON_RESTART);
+    verifyPodNotReplaced();
+  }
+
+  @Test
   public void whenPodCreatedWithDomainV2Settings_livenessProbeHasConfiguredTuning() {
     configureServer()
         .withLivenessProbeSettings(CONFIGURED_DELAY, CONFIGURED_TIMEOUT, CONFIGURED_PERIOD);
@@ -418,19 +489,20 @@ public abstract class PodHelperTestBase {
 
   @Test 
   public void whenPodCreationFailsDueToUnprocessableEntityFailure_reportInDomainStatus() {
-    testSupport.failOnResource(POD, getPodName(), NS, new UnprocessableEntityBuilder()
+    testSupport.failOnResource(POD, getPodName(), NS, new UnrecoverableErrorBuilderImpl()
         .withReason("FieldValueNotFound")
         .withMessage("Test this failure")
         .build());
 
     testSupport.runSteps(getStepFactory(), terminalStep);
 
-    assertThat(getDomain(), hasStatus("FieldValueNotFound", "Test this failure"));
+    assertThat(getDomain(), hasStatus("FieldValueNotFound",
+        "testcall in namespace junit, for testName: Test this failure"));
   }
 
   @Test
   public void whenPodCreationFailsDueToUnprocessableEntityFailure_abortFiber() {
-    testSupport.failOnResource(POD, getPodName(), NS, new UnprocessableEntityBuilder()
+    testSupport.failOnResource(POD, getPodName(), NS, new UnrecoverableErrorBuilderImpl()
         .withReason("FieldValueNotFound")
         .withMessage("Test this failure")
         .build());
@@ -446,7 +518,8 @@ public abstract class PodHelperTestBase {
 
     testSupport.runSteps(getStepFactory(), terminalStep);
 
-    assertThat(getDomain(), hasStatus("Forbidden", getQuotaExceededMessage()));
+    assertThat(getDomain(), hasStatus("Forbidden",
+        "testcall in namespace junit, for testName: " + getQuotaExceededMessage()));
   }
 
   private ApiException createQuotaExceededException() {
@@ -466,7 +539,19 @@ public abstract class PodHelperTestBase {
     assertThat(terminalStep.wasRun(), is(false));
   }
 
+  // todo set property to indicate dynamic/on_restart copying
   protected abstract void verifyPodReplaced();
+
+  protected void verifyPodNotReplaced() {
+    testSupport.addComponent(
+        ProcessingConstants.PODWATCHER_COMPONENT_NAME,
+        PodAwaiterStepFactory.class,
+        new NullPodAwaiterStepFactory(terminalStep));
+
+    testSupport.runSteps(getStepFactory(), terminalStep);
+
+    assertThat(logRecords, containsFine(getExistsMessageKey()));
+  }
 
   protected abstract void verifyPodNotReplacedWhen(PodMutator mutator);
 
@@ -572,7 +657,7 @@ public abstract class PodHelperTestBase {
   public void createdPod_hasConfigMapVolume() {
     V1Volume credentialsVolume = getVolumeWithName(getCreatedPod(), CONFIGMAP_VOLUME_NAME);
 
-    assertThat(credentialsVolume.getConfigMap().getName(), equalTo(DOMAIN_CONFIG_MAP_NAME));
+    assertThat(credentialsVolume.getConfigMap().getName(), equalTo(SCRIPT_CONFIG_MAP_NAME));
     assertThat(credentialsVolume.getConfigMap().getDefaultMode(), equalTo(READ_AND_EXECUTE_MODE));
   }
 
@@ -590,8 +675,6 @@ public abstract class PodHelperTestBase {
     assertThat(
         getCreatedPod().getMetadata().getLabels(),
         allOf(
-            hasEntry(
-                LabelConstants.RESOURCE_VERSION_LABEL, VersionConstants.DEFAULT_DOMAIN_VERSION),
             hasEntry(LabelConstants.DOMAINUID_LABEL, UID),
             hasEntry(LabelConstants.DOMAINNAME_LABEL, DOMAIN_NAME),
             hasEntry(LabelConstants.SERVERNAME_LABEL, getServerName()),
@@ -609,7 +692,7 @@ public abstract class PodHelperTestBase {
   }
 
   @Test
-  @Ignore("Ignored: getCreatedPodSpecContainer is returing null because Pod is not yet created")
+  @Ignore("Ignored: getCreatedPodSpecContainer is returning null because Pod is not yet created")
   public void whenPodCreated_containerUsesListenPort() {
     V1Container v1Container = getCreatedPodSpecContainer();
 
@@ -866,6 +949,15 @@ public abstract class PodHelperTestBase {
   }
 
   @Test
+  public void whenServerConfigurationAddsIntrospectionVersion_dontReplacePod() {
+    initializeExistingPod();
+
+    configurator.withIntrospectVersion("123");
+
+    verifyPodNotReplaced();
+  }
+
+  @Test
   public void whenServerListenPortChanged_replacePod() {
     initializeExistingPod();
 
@@ -884,15 +976,36 @@ public abstract class PodHelperTestBase {
   }
 
   @Test
-  public void whenNoPod_retryOnFailure() {
+  public void whenMiiSecretsHashChanged_replacePod() {
+    testSupport.addToPacket(IntrospectorConfigMapKeys.SECRETS_MD_5, "originalSecret");
+    initializeExistingPod();
+
+    testSupport.addToPacket(IntrospectorConfigMapKeys.SECRETS_MD_5, "newSecret");
+
+    verifyPodReplaced();
+  }
+
+  @Test
+  public void whenMiiDomainZipHashChanged_replacePod() {
+    testSupport.addToPacket(IntrospectorConfigMapKeys.DOMAINZIP_HASH, "originalSecret");
+    initializeExistingPod();
+
+    testSupport.addToPacket(IntrospectorConfigMapKeys.DOMAINZIP_HASH, "newSecret");
+
+    verifyPodReplaced();
+  }
+
+  @Test
+  public void whenNoPod_onFiveHundred() {
     testSupport.addRetryStrategy(retryStrategy);
-    testSupport.failOnCreate(KubernetesTestSupport.POD, getPodName(), NS, 401);
+    testSupport.failOnCreate(KubernetesTestSupport.POD, getPodName(), NS, 500);
 
     FiberTestSupport.StepFactory stepFactory = getStepFactory();
     Step initialStep = stepFactory.createStepList(terminalStep);
     testSupport.runSteps(initialStep);
 
-    testSupport.verifyCompletionThrowable(ApiException.class);
+    assertThat(getDomain(), hasStatus("ServerError",
+            "testcall in namespace junit, for testName: failure reported in test"));
   }
 
   @Test
@@ -945,7 +1058,6 @@ public abstract class PodHelperTestBase {
   V1ObjectMeta createPodMetadata() {
     V1ObjectMeta meta =
         new V1ObjectMeta()
-            .putLabelsItem(RESOURCE_VERSION_LABEL, VersionConstants.DEFAULT_DOMAIN_VERSION)
             .putLabelsItem(LabelConstants.DOMAINUID_LABEL, UID)
             .putLabelsItem(LabelConstants.DOMAINNAME_LABEL, DOMAIN_NAME)
             .putLabelsItem(LabelConstants.DOMAINHOME_LABEL, "/u01/oracle/user_projects/domains")
@@ -1301,7 +1413,17 @@ public abstract class PodHelperTestBase {
     containers.forEach(c -> assertThat(c.getResources().getRequests(), hasResourceQuantity("memory", "250m")));
   }
 
-  // todo test that changing a label or annotation does not change the hash
+  @Test
+  public void whenPodCreated_createPodWithOwnerReference() {
+    V1OwnerReference expectedReference = new V1OwnerReference()
+        .apiVersion(KubernetesConstants.DOMAIN_GROUP + "/" + KubernetesConstants.DOMAIN_VERSION)
+        .kind(KubernetesConstants.DOMAIN)
+        .name(DOMAIN_NAME)
+        .uid(KUBERNETES_UID)
+        .controller(true);
+
+    assertThat(getCreatedPod().getMetadata().getOwnerReferences(), contains(expectedReference));
+  }
 
   interface PodMutator {
     void mutate(V1Pod pod);
@@ -1336,4 +1458,38 @@ public abstract class PodHelperTestBase {
       return next;
     }
   }
+
+  public static class DelayedPodAwaiterStepFactory implements PodAwaiterStepFactory {
+    private final int delaySeconds;
+
+    public DelayedPodAwaiterStepFactory(int delaySeconds) {
+      this.delaySeconds = delaySeconds;
+    }
+
+    @Override
+    public Step waitForReady(V1Pod pod, Step next) {
+      return new DelayStep(next, delaySeconds);
+    }
+
+    @Override
+    public Step waitForDelete(V1Pod pod, Step next) {
+      return new DelayStep(next, delaySeconds);
+    }
+  }
+
+  private static class DelayStep extends Step {
+    private final int delay;
+    private final Step next;
+
+    DelayStep(Step next, int delay) {
+      this.delay = delay;
+      this.next = next;
+    }
+
+    @Override
+    public NextAction apply(Packet packet) {
+      return doDelay(next, packet, delay, TimeUnit.SECONDS);
+    }
+  }
+
 }

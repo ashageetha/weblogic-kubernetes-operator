@@ -6,6 +6,9 @@ package oracle.kubernetes.operator.helpers;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import javax.annotation.Nonnull;
 import javax.json.Json;
 import javax.json.JsonPatchBuilder;
 
@@ -14,6 +17,7 @@ import com.meterware.simplestub.Memento;
 import io.kubernetes.client.custom.V1Patch;
 import io.kubernetes.client.openapi.ApiException;
 import io.kubernetes.client.openapi.models.V1ConfigMap;
+import io.kubernetes.client.openapi.models.V1CustomResourceDefinition;
 import io.kubernetes.client.openapi.models.V1Event;
 import io.kubernetes.client.openapi.models.V1EventList;
 import io.kubernetes.client.openapi.models.V1ObjectMeta;
@@ -27,8 +31,8 @@ import io.kubernetes.client.openapi.models.V1ServiceList;
 import io.kubernetes.client.openapi.models.V1Status;
 import io.kubernetes.client.openapi.models.V1SubjectAccessReview;
 import io.kubernetes.client.openapi.models.V1TokenReview;
-import io.kubernetes.client.openapi.models.V1beta1CustomResourceDefinition;
 import oracle.kubernetes.operator.calls.CallResponse;
+import oracle.kubernetes.operator.calls.FailureStatusSourceException;
 import oracle.kubernetes.operator.steps.DefaultResponseStep;
 import oracle.kubernetes.operator.work.NextAction;
 import oracle.kubernetes.operator.work.Packet;
@@ -36,7 +40,11 @@ import oracle.kubernetes.operator.work.Step;
 import oracle.kubernetes.utils.SystemClockTestSupport;
 import oracle.kubernetes.utils.TestUtils;
 import oracle.kubernetes.weblogic.domain.model.Domain;
+import oracle.kubernetes.weblogic.domain.model.DomainCondition;
+import oracle.kubernetes.weblogic.domain.model.DomainConditionType;
 import oracle.kubernetes.weblogic.domain.model.DomainList;
+import oracle.kubernetes.weblogic.domain.model.DomainSpec;
+import oracle.kubernetes.weblogic.domain.model.DomainStatus;
 import org.joda.time.DateTime;
 import org.junit.After;
 import org.junit.Before;
@@ -54,6 +62,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasEntry;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.junit.MatcherAssert.assertThat;
 
 public class KubernetesTestSupportTest {
@@ -61,7 +70,7 @@ public class KubernetesTestSupportTest {
   private static final String NS = "namespace1";
   private static final String POD_LOG_CONTENTS = "asdfghjkl";
   List<Memento> mementos = new ArrayList<>();
-  private KubernetesTestSupport testSupport = new KubernetesTestSupport();
+  private final KubernetesTestSupport testSupport = new KubernetesTestSupport();
 
   /**
    * Setup test.
@@ -89,9 +98,9 @@ public class KubernetesTestSupportTest {
 
   @Test
   public void afterCreateCrd_crdExists() {
-    V1beta1CustomResourceDefinition crd = createCrd("mycrd");
+    V1CustomResourceDefinition crd = createCrd("mycrd");
 
-    TestResponseStep<V1beta1CustomResourceDefinition> responseStep = new TestResponseStep<>();
+    TestResponseStep<V1CustomResourceDefinition> responseStep = new TestResponseStep<>();
     testSupport.runSteps(new CallBuilder().createCustomResourceDefinitionAsync(crd, responseStep));
 
     assertThat(testSupport.getResources(CUSTOM_RESOURCE_DEFINITION), contains(crd));
@@ -99,24 +108,24 @@ public class KubernetesTestSupportTest {
 
   @Test
   public void afterCreateCrd_incrementNumCalls() {
-    V1beta1CustomResourceDefinition crd = createCrd("mycrd");
+    V1CustomResourceDefinition crd = createCrd("mycrd");
 
-    TestResponseStep<V1beta1CustomResourceDefinition> responseStep = new TestResponseStep<>();
+    TestResponseStep<V1CustomResourceDefinition> responseStep = new TestResponseStep<>();
     testSupport.runSteps(new CallBuilder().createCustomResourceDefinitionAsync(crd, responseStep));
 
     assertThat(testSupport.getNumCalls(), equalTo(1));
   }
 
   @SuppressWarnings("SameParameterValue")
-  private V1beta1CustomResourceDefinition createCrd(String name) {
-    return new V1beta1CustomResourceDefinition().metadata(new V1ObjectMeta().name(name));
+  private V1CustomResourceDefinition createCrd(String name) {
+    return new V1CustomResourceDefinition().metadata(new V1ObjectMeta().name(name));
   }
 
   @Test
   public void afterCreateCrd_crdReturnedInCallResponse() {
-    V1beta1CustomResourceDefinition crd = createCrd("mycrd");
+    V1CustomResourceDefinition crd = createCrd("mycrd");
 
-    TestResponseStep<V1beta1CustomResourceDefinition> responseStep = new TestResponseStep<>();
+    TestResponseStep<V1CustomResourceDefinition> responseStep = new TestResponseStep<>();
     testSupport.runSteps(new CallBuilder().createCustomResourceDefinitionAsync(crd, responseStep));
 
     assertThat(responseStep.callResponse.getResult(), equalTo(crd));
@@ -126,23 +135,23 @@ public class KubernetesTestSupportTest {
   public void whenCrdWithSameNameExists_createFails() {
     testSupport.defineResources(createCrd("mycrd"));
 
-    TestResponseStep<V1beta1CustomResourceDefinition> responseStep = new TestResponseStep<>();
+    TestResponseStep<V1CustomResourceDefinition> responseStep = new TestResponseStep<>();
     Step steps =
           new CallBuilder().createCustomResourceDefinitionAsync(createCrd("mycrd"), responseStep);
     testSupport.runSteps(steps);
 
-    testSupport.verifyCompletionThrowable(ApiException.class);
+    testSupport.verifyCompletionThrowable(FailureStatusSourceException.class);
   }
 
   @Test
   public void afterReplaceExistingCrd_crdExists() {
-    V1beta1CustomResourceDefinition oldCrd = createCrd("mycrd");
+    V1CustomResourceDefinition oldCrd = createCrd("mycrd");
     testSupport.defineResources(oldCrd);
 
-    V1beta1CustomResourceDefinition crd = createCrd("");
-    crd.getMetadata().putLabelsItem("be", "different");
+    V1CustomResourceDefinition crd = createCrd("");
+    Objects.requireNonNull(crd.getMetadata()).putLabelsItem("be", "different");
 
-    TestResponseStep<V1beta1CustomResourceDefinition> responseStep = new TestResponseStep<>();
+    TestResponseStep<V1CustomResourceDefinition> responseStep = new TestResponseStep<>();
     Step steps = new CallBuilder().replaceCustomResourceDefinitionAsync("mycrd", crd, responseStep);
     testSupport.runSteps(steps);
 
@@ -177,6 +186,23 @@ public class KubernetesTestSupportTest {
   }
 
   @Test
+  public void afterDomainStatusReplaced_resourceVersionIsIncremented() {
+    Domain originalDomain = createDomain(NS, "domain1");
+    testSupport.defineResources(originalDomain);
+    originalDomain.getMetadata().setResourceVersion("123");
+
+    Step steps = new CallBuilder()
+        .replaceDomainStatusAsync("domain1", NS,
+            createDomain(NS, "domain1")
+                .withStatus(new DomainStatus().addCondition(new DomainCondition(DomainConditionType.Progressing))),
+            null);
+    testSupport.runSteps(steps);
+
+    Domain updatedDomain = testSupport.getResourceWithName(DOMAIN, "domain1");
+    assertThat(updatedDomain.getMetadata().getResourceVersion(), equalTo("124"));
+  }
+
+  @Test
   public void afterPatchDomainWithTimeStampEnabled_timeStampIsNotChanged() {
     Domain originalDomain = createDomain(NS, "domain1");
     testSupport.defineResources(originalDomain);
@@ -190,6 +216,83 @@ public class KubernetesTestSupportTest {
 
     Domain updatedDomain = testSupport.getResourceWithName(DOMAIN, "domain1");
     assertThat(getCreationTimestamp(updatedDomain), equalTo(getCreationTimestamp(originalDomain)));
+  }
+
+  @Test
+  public void afterPatchDomainAsynchronously_statusIsUnchanged() throws ApiException {
+    Domain originalDomain = createDomain(NS, "domain").withStatus(new DomainStatus().withMessage("leave this"));
+    testSupport.defineResources(originalDomain);
+
+    JsonPatchBuilder patchBuilder = Json.createPatchBuilder();
+    patchBuilder.replace("/status/message", "changed it");
+    patchBuilder.add("/status/reason", "added a reason");
+    Step steps = new CallBuilder().patchDomainAsync("domain", NS, getPatchBody(patchBuilder), null);
+    testSupport.runSteps(steps);
+
+    assertThat(getDomainStatus("domain").getMessage(), equalTo("leave this"));
+    assertThat(getDomainStatus("domain").getReason(), nullValue());
+  }
+
+  @Test
+  public void afterPatchDomainSynchronously_statusIsUnchanged() throws ApiException {
+    Domain originalDomain = createDomain(NS, "domain").withStatus(new DomainStatus().withMessage("leave this"));
+    testSupport.defineResources(originalDomain);
+
+    JsonPatchBuilder patchBuilder = Json.createPatchBuilder();
+    patchBuilder.replace("/status/message", "changed it");
+    patchBuilder.add("/status/reason", "added a reason");
+    new CallBuilder().patchDomain("domain", NS, getPatchBody(patchBuilder));
+
+    assertThat(getDomainStatus("domain").getMessage(), equalTo("leave this"));
+    assertThat(getDomainStatus("domain").getReason(), nullValue());
+  }
+
+  private V1Patch getPatchBody(JsonPatchBuilder patchBuilder) {
+    return new V1Patch(patchBuilder.build().toString());
+  }
+
+  @Test
+  public void afterReplaceDomainAsync_statusIsUnchanged() {
+    Domain originalDomain = createDomain(NS, "domain1").withStatus(new DomainStatus().withMessage("leave this"));
+    testSupport.defineResources(originalDomain);
+
+    Domain newDomain = createDomain(NS, "domain1");
+    Step steps = new CallBuilder().replaceDomainAsync("domain1", NS, newDomain, null);
+    testSupport.runSteps(steps);
+
+    assertThat(getDomainStatus("domain1").getMessage(), equalTo("leave this"));
+  }
+
+  private @Nonnull DomainStatus getDomainStatus(String name) {
+    return Optional.ofNullable((Domain) testSupport.getResourceWithName(DOMAIN, name))
+          .map(Domain::getStatus)
+          .orElse(new DomainStatus());
+
+  }
+
+  @Test
+  public void afterReplaceDomainStatusAsync_specIsUnchanged() {
+    Domain originalDomain = createDomain(NS, "domain1").withSpec(new DomainSpec().withReplicas(5));
+    testSupport.defineResources(originalDomain);
+
+    Domain newDomain = createDomain(NS, "domain1");
+    Step steps = new CallBuilder().replaceDomainStatusAsync("domain1", NS, newDomain, null);
+    testSupport.runSteps(steps);
+
+    Domain updatedDomain = testSupport.getResourceWithName(DOMAIN, "domain1");
+    assertThat(updatedDomain.getSpec().getReplicas(), equalTo(5));
+  }
+
+  @Test
+  public void afterReplaceDomainStatusSynchronously_specIsUnchanged() throws ApiException {
+    Domain originalDomain = createDomain(NS, "domain1").withSpec(new DomainSpec().withReplicas(5));
+    testSupport.defineResources(originalDomain);
+
+    Domain newDomain = createDomain(NS, "domain1");
+    new CallBuilder().replaceDomainStatus("domain1", NS, newDomain);
+
+    Domain updatedDomain = testSupport.getResourceWithName(DOMAIN, "domain1");
+    assertThat(updatedDomain.getSpec().getReplicas(), equalTo(5));
   }
 
   private DateTime getCreationTimestamp(Domain domain) {
@@ -266,7 +369,7 @@ public class KubernetesTestSupportTest {
     testSupport.defineResources(pod1, pod2, pod3);
 
     TestResponseStep<V1Status> responseStep = new TestResponseStep<>();
-    testSupport.runSteps(new CallBuilder().deletePodAsync("mycrd", "ns2", null, responseStep));
+    testSupport.runSteps(new CallBuilder().deletePodAsync("mycrd", "ns2", "", null, responseStep));
 
     assertThat(testSupport.getResources(POD), containsInAnyOrder(pod1, pod3));
   }
@@ -276,9 +379,9 @@ public class KubernetesTestSupportTest {
     testSupport.failOnResource(POD, "pod1", "ns2", HTTP_BAD_REQUEST);
 
     TestResponseStep<V1Status> responseStep = new TestResponseStep<>();
-    testSupport.runSteps(new CallBuilder().deletePodAsync("pod1", "ns2", null, responseStep));
+    testSupport.runSteps(new CallBuilder().deletePodAsync("pod1", "ns2", "", null, responseStep));
 
-    testSupport.verifyCompletionThrowable(ApiException.class);
+    testSupport.verifyCompletionThrowable(FailureStatusSourceException.class);
     assertThat(responseStep.callResponse.getStatusCode(), equalTo(HTTP_BAD_REQUEST));
   }
 
@@ -287,7 +390,7 @@ public class KubernetesTestSupportTest {
     testSupport.failOnResource(POD, "pod1", "ns2", HTTP_BAD_REQUEST);
 
     TestResponseStep<V1Status> responseStep = new TestResponseStep<>();
-    testSupport.runSteps(new CallBuilder().deletePodAsync("pod2", "ns2", null, responseStep));
+    testSupport.runSteps(new CallBuilder().deletePodAsync("pod2", "ns2", "", null, responseStep));
   }
 
   @Test
@@ -318,11 +421,11 @@ public class KubernetesTestSupportTest {
 
     TestResponseStep<V1Pod> responseStep = new TestResponseStep<>();
     testSupport.runSteps(
-          new CallBuilder().patchPodAsync("pod1", "ns1",
-                new V1Patch(patchBuilder.build().toString()), responseStep));
+          new CallBuilder().patchPodAsync("pod1", "ns1", "",
+              new io.kubernetes.client.custom.V1Patch(patchBuilder.build().toString()), responseStep));
 
     V1Pod pod2 = (V1Pod) testSupport.getResources(POD).stream().findFirst().orElse(pod1);
-    assertThat(pod2.getMetadata().getLabels(), hasEntry("k1", "v2"));
+    assertThat(Objects.requireNonNull(pod2.getMetadata()).getLabels(), hasEntry("k1", "v2"));
   }
 
   @Test
@@ -334,11 +437,11 @@ public class KubernetesTestSupportTest {
 
     TestResponseStep<V1Pod> responseStep = new TestResponseStep<>();
     testSupport.runSteps(
-          new CallBuilder().patchPodAsync("pod1", "ns1",
-                new V1Patch(patchBuilder.build().toString()), responseStep));
+          new CallBuilder().patchPodAsync("pod1", "ns1", "",
+              new io.kubernetes.client.custom.V1Patch(patchBuilder.build().toString()), responseStep));
 
     V1Pod pod2 = (V1Pod) testSupport.getResources(POD).stream().findFirst().orElse(pod1);
-    assertThat(pod2.getMetadata().getLabels(), hasEntry("k1", "v2"));
+    assertThat(Objects.requireNonNull(pod2.getMetadata()).getLabels(), hasEntry("k1", "v2"));
   }
 
   @Test
@@ -355,7 +458,7 @@ public class KubernetesTestSupportTest {
   }
 
   private Domain createDomain(String namespace, String name) {
-    return new Domain().withMetadata(new V1ObjectMeta().name(name).namespace(namespace));
+    return new Domain().withMetadata(new V1ObjectMeta().name(name).namespace(namespace)).withStatus(new DomainStatus());
   }
 
   @Test
@@ -425,7 +528,7 @@ public class KubernetesTestSupportTest {
   @Test
   public void whenConfigMapNotFound_readStatusIsNotFound() {
     TestResponseStep<V1ConfigMap> endStep = new TestResponseStep<>();
-    Packet packet = testSupport.runSteps(new CallBuilder().readConfigMapAsync("", "", endStep));
+    Packet packet = testSupport.runSteps(new CallBuilder().readConfigMapAsync("", "", "", endStep));
 
     assertThat(packet.getSpi(CallResponse.class).getStatusCode(), equalTo(CallBuilder.NOT_FOUND));
     assertThat(packet.getSpi(CallResponse.class).getE(), notNullValue());
@@ -436,7 +539,7 @@ public class KubernetesTestSupportTest {
     TestResponseStep<String> endStep = new TestResponseStep<>();
     testSupport.definePodLog("name", "namespace", POD_LOG_CONTENTS);
 
-    testSupport.runSteps(new CallBuilder().readPodLogAsync("name", "namespace", endStep));
+    testSupport.runSteps(new CallBuilder().readPodLogAsync("name", "namespace", "", endStep));
 
     assertThat(endStep.callResponse.getResult(), equalTo(POD_LOG_CONTENTS));
   }

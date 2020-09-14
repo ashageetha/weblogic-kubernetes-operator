@@ -39,10 +39,8 @@ In this sample, we will provide a custom Apache plugin configuration to fine tun
 * Create a custom Apache plugin configuration file named `custom_mod_wl_apache.conf`. The file content is similar to below.
 
 ```
-# Copyright (c) 2018 Oracle and/or its affiliates. All rights reserved.
-#
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
 # Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
-#
 
 <IfModule mod_weblogic.c>
 WebLogicHost ${WEBLOGIC_HOST}
@@ -104,8 +102,7 @@ $ touch input.yaml
 Edit the input parameters file, `input.yaml`. The file content is similar to below.
 
 ```
-# Copyright (c) 2018 Oracle and/or its affiliates. All rights reserved.
-#
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
 # Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 # Use this to provide your own Apache webtier configuration as needed; simply define this
@@ -131,7 +128,7 @@ The Apache webtier Helm chart is located in the `kubernetes/samples/charts/apach
 
 ```
 $ cd kubernetes/samples/charts
-$ helm install --name my-release --values apache-samples/custom-sample/input.yaml --namespace apache-sample apache-webtier
+$ helm install my-release --values apache-samples/custom-sample/input.yaml --namespace apache-sample apache-webtier
 ```
 
 ## 8. Run the sample application
@@ -148,5 +145,5 @@ $ curl -k --silent https://${HOSTNAME}:30443/weblogic2/testwebapp/
 
 ## 9. Uninstall the Apache webtier
 ```
-$ helm delete --purge my-release
+$ helm uninstall my-release --namespace apache-sample
 ```

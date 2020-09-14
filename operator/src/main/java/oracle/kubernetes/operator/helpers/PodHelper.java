@@ -6,6 +6,7 @@ package oracle.kubernetes.operator.helpers;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import io.kubernetes.client.openapi.models.V1DeleteOptions;
 import io.kubernetes.client.openapi.models.V1EnvVar;
@@ -16,10 +17,12 @@ import io.kubernetes.client.openapi.models.V1PodSpec;
 import io.kubernetes.client.openapi.models.V1PodStatus;
 import oracle.kubernetes.operator.DomainStatusUpdater;
 import oracle.kubernetes.operator.LabelConstants;
+import oracle.kubernetes.operator.MakeRightDomainOperation;
 import oracle.kubernetes.operator.PodAwaiterStepFactory;
 import oracle.kubernetes.operator.ProcessingConstants;
 import oracle.kubernetes.operator.TuningParameters;
 import oracle.kubernetes.operator.calls.CallResponse;
+import oracle.kubernetes.operator.calls.RetryStrategy;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
 import oracle.kubernetes.operator.logging.MessageKeys;
@@ -32,6 +35,9 @@ import oracle.kubernetes.operator.work.Step;
 import oracle.kubernetes.weblogic.domain.model.ServerSpec;
 import oracle.kubernetes.weblogic.domain.model.Shutdown;
 
+import static oracle.kubernetes.operator.LabelConstants.CLUSTERNAME_LABEL;
+import static oracle.kubernetes.operator.ProcessingConstants.SERVERS_TO_ROLL;
+
 public class PodHelper {
   static final long DEFAULT_ADDITIONAL_DELETE_TIME = 10;
   private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
@@ -40,12 +46,31 @@ public class PodHelper {
   }
 
   /**
-   * Creates a managed server pod resource, based on the specified packet.
+   * Creates an admin server pod resource, based on the specified packet.
+   * Expects the packet to contain a domain presence info as well as:
+   *   SCAN                 the topology for the server (WlsServerConfig)
+   *   DOMAIN_TOPOLOGY      the topology for the domain (WlsDomainConfig)
+   *
    *
    * @param packet a packet describing the domain model and topology.
    * @return an appropriate Kubernetes resource
    */
-  static V1Pod createManagedServerPodModel(Packet packet) {
+  public static V1Pod createAdminServerPodModel(Packet packet) {
+    return new AdminPodStepContext(null, packet).createPodModel();
+  }
+
+  /**
+   * Creates a managed server pod resource, based on the specified packet.
+   * Expects the packet to contain a domain presence info as well as:
+   *   CLUSTER_NAME         (optional) the name of the cluster to which the server is assigned
+   *   SCAN                 the topology for the server (WlsServerConfig)
+   *   DOMAIN_TOPOLOGY      the topology for the domain (WlsDomainConfig)
+   *
+   *
+   * @param packet a packet describing the domain model and topology.
+   * @return an appropriate Kubernetes resource
+   */
+  public static V1Pod createManagedServerPodModel(Packet packet) {
     return new ManagedPodStepContext(null, packet).createPodModel();
   }
 
@@ -57,9 +82,66 @@ public class PodHelper {
   public static boolean isReady(V1Pod pod) {
     boolean ready = getReadyStatus(pod);
     if (ready) {
-      LOGGER.info(MessageKeys.POD_IS_READY, pod.getMetadata().getName());
+      LOGGER.fine(MessageKeys.POD_IS_READY, pod.getMetadata().getName());
     }
     return ready;
+  }
+
+  /**
+   * Get list of scheduled pods for a particular cluster or non-clustered servers.
+   * @param info Domain presence info
+   * @param clusterName cluster name of the pod server
+   * @return list containing scheduled pods
+   */
+  public static List<String> getScheduledPods(DomainPresenceInfo info, String clusterName) {
+    // These are presently scheduled servers
+    List<String> scheduledServers = new ArrayList<>();
+    for (Map.Entry<String, ServerKubernetesObjects> entry : info.getServers().entrySet()) {
+      V1Pod pod = entry.getValue().getPod().get();
+      if (pod != null && !PodHelper.isDeleting(pod) && PodHelper.getScheduledStatus(pod)) {
+        String wlsClusterName = pod.getMetadata().getLabels().get(CLUSTERNAME_LABEL);
+        if ((wlsClusterName == null) || (wlsClusterName.contains(clusterName))) {
+          scheduledServers.add(entry.getKey());
+        }
+      }
+    }
+    return scheduledServers;
+  }
+
+  /**
+   * Get list of ready pods for a particular cluster or non-clustered servers.
+   * @param info Domain presence info
+   * @param clusterName cluster name of the pod server
+   * @return list containing ready pods
+   */
+  public static List<String> getReadyPods(DomainPresenceInfo info, String clusterName) {
+    // These are presently Ready servers
+    List<String> readyServers = new ArrayList<>();
+    for (Map.Entry<String, ServerKubernetesObjects> entry : info.getServers().entrySet()) {
+      V1Pod pod = entry.getValue().getPod().get();
+      if (pod != null && !PodHelper.isDeleting(pod) && PodHelper.getReadyStatus(pod)) {
+        String wlsClusterName = pod.getMetadata().getLabels().get(CLUSTERNAME_LABEL);
+        if ((wlsClusterName == null) || (wlsClusterName.contains(clusterName))) {
+          readyServers.add(entry.getKey());
+        }
+      }
+    }
+    return readyServers;
+  }
+
+  /**
+   * get if pod is in scheduled state.
+   * @param pod pod
+   * @return true, if pod is scheduled
+   */
+  public static boolean getScheduledStatus(V1Pod pod) {
+    V1PodSpec spec = pod.getSpec();
+    if (spec != null) {
+      if (spec.getNodeName() != null) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -121,12 +203,8 @@ public class PodHelper {
    * @return domain UID
    */
   public static String getPodDomainUid(V1Pod pod) {
-    V1ObjectMeta meta = pod.getMetadata();
-    Map<String, String> labels = meta.getLabels();
-    if (labels != null) {
-      return labels.get(LabelConstants.DOMAINUID_LABEL);
-    }
-    return null;
+    return KubernetesUtils.getDomainUidLabel(
+        Optional.ofNullable(pod).map(V1Pod::getMetadata).orElse(null));
   }
 
   /**
@@ -142,6 +220,7 @@ public class PodHelper {
     }
     return null;
   }
+
 
   /**
    * Factory for {@link Step} that creates admin server pod.
@@ -204,9 +283,11 @@ public class PodHelper {
 
   static class AdminPodStepContext extends PodStepContext {
     static final String INTERNAL_OPERATOR_CERT_ENV = "INTERNAL_OPERATOR_CERT";
+    private final Packet packet;
 
     AdminPodStepContext(Step conflictStep, Packet packet) {
       super(conflictStep, packet);
+      this.packet = packet;
 
       init();
     }
@@ -227,13 +308,23 @@ public class PodHelper {
     }
 
     @Override
+    Step createProgressingStep(Step actionStep) {
+      return DomainStatusUpdater.createProgressingStep(
+          DomainStatusUpdater.ADMIN_SERVER_STARTING_PROGRESS_REASON, false, actionStep);
+    }
+
+    @Override
     Step createNewPod(Step next) {
-      return createPod(next);
+      return createProgressingStep(createPod(next));
     }
 
     @Override
     Step replaceCurrentPod(Step next) {
-      return createCyclePodStep(next);
+      if (MakeRightDomainOperation.isInspectionRequired(packet)) {
+        return createProgressingStep(MakeRightDomainOperation.createStepsToRerunWithIntrospection(packet));
+      } else {
+        return createProgressingStep(createCyclePodStep(next));
+      }
     }
 
     @Override
@@ -361,28 +452,34 @@ public class PodHelper {
     @Override
     // let the pod rolling step update the pod
     Step replaceCurrentPod(Step next) {
+      return deferProcessing(createCyclePodStep(next));
+    }
+
+    private Step deferProcessing(Step deferredStep) {
       synchronized (packet) {
-        @SuppressWarnings("unchecked")
-        Map<String, Step.StepAndPacket> rolling =
-            (Map<String, Step.StepAndPacket>) packet.get(ProcessingConstants.SERVERS_TO_ROLL);
-        if (rolling != null) {
-          rolling.put(
-              getServerName(),
-              new Step.StepAndPacket(
-                  DomainStatusUpdater.createProgressingStep(
-                      DomainStatusUpdater.MANAGED_SERVERS_STARTING_PROGRESS_REASON,
-                      false,
-                      createCyclePodStep(next)),
-                  packet.clone()));
-        }
+        Optional.ofNullable(getServersToRoll()).ifPresent(r -> r.put(getServerName(), createRollRequest(deferredStep)));
       }
       return null;
     }
 
+    private Step.StepAndPacket createRollRequest(Step deferredStep) {
+      return new Step.StepAndPacket(createProgressingStep(deferredStep), packet.clone());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Step.StepAndPacket> getServersToRoll() {
+      return (Map<String, Step.StepAndPacket>) packet.get(SERVERS_TO_ROLL);
+    }
+
+    @Override
+    Step createProgressingStep(Step actionStep) {
+      return DomainStatusUpdater.createProgressingStep(
+          DomainStatusUpdater.MANAGED_SERVERS_STARTING_PROGRESS_REASON, false, actionStep);
+    }
+
     @Override
     Step createNewPod(Step next) {
-      return DomainStatusUpdater.createProgressingStep(
-          DomainStatusUpdater.MANAGED_SERVERS_STARTING_PROGRESS_REASON, false, createPod(next));
+      return createProgressingStep(createPod(next));
     }
 
     @Override
@@ -409,7 +506,7 @@ public class PodHelper {
     protected V1ObjectMeta createMetadata() {
       V1ObjectMeta metadata = super.createMetadata();
       if (getClusterName() != null) {
-        metadata.putLabelsItem(LabelConstants.CLUSTERNAME_LABEL, getClusterName());
+        metadata.putLabelsItem(CLUSTERNAME_LABEL, getClusterName());
       }
       return metadata;
     }
@@ -429,10 +526,7 @@ public class PodHelper {
     List<V1EnvVar> getConfiguredEnvVars(TuningParameters tuningParameters) {
       List<V1EnvVar> envVars = createCopy((List<V1EnvVar>) packet.get(ProcessingConstants.ENVVARS));
 
-      List<V1EnvVar> vars = new ArrayList<>();
-      if (envVars != null) {
-        vars.addAll(envVars);
-      }
+      List<V1EnvVar> vars = new ArrayList<>(envVars);
       addStartupEnvVars(vars);
       return vars;
     }
@@ -470,7 +564,7 @@ public class PodHelper {
       if (oldPod != null) {
         Map<String, String> labels = oldPod.getMetadata().getLabels();
         if (labels != null) {
-          clusterName = labels.get(LabelConstants.CLUSTERNAME_LABEL);
+          clusterName = labels.get(CLUSTERNAME_LABEL);
         }
 
         ServerSpec serverSpec = info.getDomain().getServer(serverName, clusterName);
@@ -487,19 +581,22 @@ public class PodHelper {
 
         String name = oldPod.getMetadata().getName();
         info.setServerPodBeingDeleted(serverName, Boolean.TRUE);
-        return doNext(deletePod(name, info.getNamespace(), gracePeriodSeconds, getNext()), packet);
+        return doNext(
+            deletePod(name, info.getNamespace(), getPodDomainUid(oldPod), gracePeriodSeconds, getNext()),
+            packet);
       } else {
         return doNext(packet);
       }
     }
 
-    private Step deletePod(String name, String namespace, long gracePeriodSeconds, Step next) {
+    private Step deletePod(String name, String namespace, String domainUid, long gracePeriodSeconds, Step next) {
 
       Step conflictStep =
           new CallBuilder()
               .readPodAsync(
                   name,
                   namespace,
+                  domainUid,
                   new DefaultResponseStep<>(next) {
                     @Override
                     public NextAction onSuccess(Packet packet, CallResponse<V1Pod> callResponse) {
@@ -514,9 +611,31 @@ public class PodHelper {
                   });
 
       V1DeleteOptions deleteOptions = new V1DeleteOptions().gracePeriodSeconds(gracePeriodSeconds);
-      return new CallBuilder()
-          .deletePodAsync(
-              name, namespace, deleteOptions, new DefaultResponseStep<>(conflictStep, next));
+      DeletePodRetryStrategy retryStrategy = new DeletePodRetryStrategy(next);
+      return new CallBuilder().withRetryStrategy(retryStrategy)
+              .deletePodAsync(name, namespace, domainUid, deleteOptions, new DefaultResponseStep<>(conflictStep, next));
     }
   }
+
+  /* Retry strategy for delete pod which will not perform any retries */
+  private static final class DeletePodRetryStrategy implements RetryStrategy {
+    private long retryCount = 0;
+    private final Step retryStep;
+
+    DeletePodRetryStrategy(Step retryStep) {
+      this.retryStep = retryStep;
+    }
+
+    @Override
+    public NextAction doPotentialRetry(Step conflictStep, Packet packet, int statusCode) {
+      NextAction na = new NextAction();
+      na.invoke(retryStep, packet);
+      return na;
+    }
+
+    @Override
+    public void reset() {
+    }
+  }
+
 }

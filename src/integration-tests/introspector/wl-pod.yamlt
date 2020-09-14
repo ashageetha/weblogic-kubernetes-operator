@@ -1,4 +1,4 @@
-# Copyright (c) 2018, 2019, Oracle Corporation and/or its affiliates. All rights reserved.
+# Copyright (c) 2018, 2020, Oracle Corporation and/or its affiliates.
 # Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
 
 apiVersion: v1
@@ -8,7 +8,6 @@ metadata:
     weblogic.createdByOperator: "true"
     weblogic.domainName: ${DOMAIN_NAME}
     weblogic.domainUID: ${DOMAIN_UID}
-    weblogic.resourceVersion: domain-v1
     weblogic.serverName: ${SERVER_NAME}
   name: ${SERVICE_NAME}
   namespace: ${NAMESPACE}
@@ -19,6 +18,8 @@ spec:
     env:
     - name: JAVA_OPTIONS
       value: "-Djava.security.egd=file:/dev/./urandom "
+      #value: "-Djava.security.egd=file:/dev/./urandom -Dweblogic.log.StdoutSeverityLevel=Debug -Dweblogic.log.LogSeverity=Debug -Dweblogic.StdoutDebugEnabled=true -Dweblogic.debug.DebugStoreIOPhysicalVerbose=true -Dweblogic.kernel.debug=true -Dweblogic.debug.DebugConnection=true -Dweblogic.debug.DebugMessaging=true -Dweblogic.debug.DebugJNDI=true -Dweblogic.debug.DebugJNDIFactories=true -Dweblogic.debug.DebugJNDIResolution=true"
+      #value: "-Djava.security.egd=file:/dev/./urandom -Dweblogic.log.RotateLogOnStartup=true -Dweblogic.log.FileMinSize=1 -Dweblogic.log.FileCount=1 -Dweblogic.log.StdoutSeverityLevel=Debug -Dweblogic.log.LogSeverity=Debug -Dweblogic.StdoutDebugEnabled=true -Dweblogic.debug.DebugStoreIOPhysicalVerbose=true -Dweblogic.kernel.debug=true -Dweblogic.debug.DebugConnection=true -Dweblogic.debug.DebugMessaging=true -Dweblogic.debug.DebugJNDI=true -Dweblogic.debug.DebugJNDIFactories=true -Dweblogic.debug.DebugJNDIResolution=true"
     - name: USER_MEM_ARGS
       value: "-XX:MaxRAMFraction=1 "
     - name: NODEMGR_JAVA_OPTIONS
@@ -59,6 +60,10 @@ spec:
       value: ""
     - name: ADMIN_PASSWORD
       value: ""
+    - name: DOMAIN_SOURCE_TYPE
+      value: "${DOMAIN_SOURCE_TYPE}"
+    - name: WDT_DOMAIN_TYPE
+      value: "${WDT_DOMAIN_TYPE:-WLS}"
     image: "${WEBLOGIC_IMAGE_NAME}:${WEBLOGIC_IMAGE_TAG}"
     imagePullPolicy: ${WEBLOGIC_IMAGE_PULL_POLICY}
     lifecycle:
@@ -106,16 +111,23 @@ spec:
   #    name: weblogic-credentials-volume
   #    readOnly: true
     - mountPath: /weblogic-operator/scripts
-      name: weblogic-domain-cm-volume
+      name: weblogic-script-cm-volume
       readOnly: true
     - mountPath: /weblogic-operator/introspector
       name: introspect-domain-cm-volume
       readOnly: true
+    - name: weblogic-runtime-encryption-volume
+      mountPath: /weblogic-operator/model-runtime-secret
   dnsPolicy: ClusterFirst
   hostname: ${SERVICE_NAME}
   restartPolicy: Always
   terminationGracePeriodSeconds: 1
   volumes:
+  - name: weblogic-runtime-encryption-volume
+    secret:
+      defaultMode: 420
+      secretName: ${DOMAIN_UID}-runtime-encryption-secret
+      optional: ${MII_WDT_ENCRYPT_SECRET}
   # WL Pods shouldn't need secrets if the introspector is working:
   #- name: weblogic-credentials-volume
   #  secret:
@@ -123,8 +135,8 @@ spec:
   #    secretName: ${WEBLOGIC_CREDENTIALS_SECRET_NAME}
   - configMap:
       defaultMode: 365
-      name: weblogic-domain-cm
-    name: weblogic-domain-cm-volume
+      name: weblogic-script-cm
+    name: weblogic-script-cm-volume
   - configMap:
       defaultMode: 365
       name: ${DOMAIN_UID}-weblogic-domain-introspect-cm

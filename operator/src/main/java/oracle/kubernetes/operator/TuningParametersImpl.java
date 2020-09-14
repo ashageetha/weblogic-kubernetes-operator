@@ -51,10 +51,10 @@ public class TuningParametersImpl extends ConfigMapConsumer implements TuningPar
             (int) readTuningParameter("domainPresenceFailureRetrySeconds", 10),
             (int) readTuningParameter("domainPresenceFailureRetryMaxCount", 5),
             (int) readTuningParameter("domainPresenceRecheckIntervalSeconds", 120),
-            (int) readTuningParameter("targetNamespaceRecheckIntervalSeconds", 3),
+            (int) readTuningParameter("domainNamespaceRecheckIntervalSeconds", 3),
             (int) readTuningParameter("statusUpdateTimeoutSeconds", 10),
             (int) readTuningParameter("statusUpdateUnchangedCountToDelayStatusRecheck", 10),
-            readTuningParameter("statusUpdateInitialShortDelay", 3),
+            readTuningParameter("statusUpdateInitialShortDelay", 5),
             readTuningParameter("statusUpdateEventualLongDelay", 30));
 
     CallBuilderTuning callBuilder =
@@ -66,7 +66,8 @@ public class TuningParametersImpl extends ConfigMapConsumer implements TuningPar
     WatchTuning watch =
         new WatchTuning(
             (int) readTuningParameter("watchLifetime", 300),
-            (int) readTuningParameter("watchMinimumDelay", 5));
+            (int) readTuningParameter("watchMinimumDelay", 5),
+            (int) readTuningParameter("watchBackstopRecheckDelaySeconds", 5));
 
     PodTuning pod =
         new PodTuning(

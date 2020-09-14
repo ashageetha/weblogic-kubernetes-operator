@@ -9,7 +9,6 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -17,16 +16,19 @@ import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.validation.Valid;
 
+import com.google.common.base.Strings;
 import com.google.gson.annotations.Expose;
 import com.google.gson.annotations.SerializedName;
+import io.kubernetes.client.common.KubernetesObject;
 import io.kubernetes.client.openapi.models.V1EnvVar;
 import io.kubernetes.client.openapi.models.V1LocalObjectReference;
 import io.kubernetes.client.openapi.models.V1ObjectMeta;
 import io.kubernetes.client.openapi.models.V1SecretReference;
 import io.kubernetes.client.openapi.models.V1VolumeMount;
 import oracle.kubernetes.json.Description;
-import oracle.kubernetes.operator.LabelConstants;
-import oracle.kubernetes.operator.VersionConstants;
+import oracle.kubernetes.operator.DomainSourceType;
+import oracle.kubernetes.operator.ModelInImageDomainType;
+import oracle.kubernetes.operator.OverrideDistributionStrategy;
 import oracle.kubernetes.operator.helpers.SecretType;
 import oracle.kubernetes.weblogic.domain.EffectiveConfigurationFactory;
 import org.apache.commons.lang3.builder.EqualsBuilder;
@@ -36,9 +38,7 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 /**
  * Domain represents a WebLogic domain and how it will be realized in the Kubernetes cluster.
  */
-@Description(
-    "Domain represents a WebLogic domain and how it will be realized in the Kubernetes cluster.")
-public class Domain {
+public class Domain implements KubernetesObject {
   /**
    * The pattern for computing the default shared logs directory.
    */
@@ -51,7 +51,7 @@ public class Domain {
    */
   @SerializedName("apiVersion")
   @Expose
-  @Description("The API version for the Domain.")
+  @Description("The API version defines the versioned schema of this Domain. Required.")
   private String apiVersion;
 
   /**
@@ -61,7 +61,7 @@ public class Domain {
    */
   @SerializedName("kind")
   @Expose
-  @Description("The type of resource. Must be 'Domain'.")
+  @Description("The type of the REST resource. Must be \"Domain\". Required.")
   private String kind;
 
   /**
@@ -71,7 +71,7 @@ public class Domain {
   @SerializedName("metadata")
   @Expose
   @Valid
-  @Description("The domain meta-data. Must include the name and namespace.")
+  @Description("The resource metadata. Must include the `name` and `namespace`. Required.")
   @Nonnull
   private V1ObjectMeta metadata = new V1ObjectMeta();
 
@@ -81,7 +81,7 @@ public class Domain {
   @SerializedName("spec")
   @Expose
   @Valid
-  @Description("The specification of the domain. Required.")
+  @Description("The specification of the operation of the WebLogic domain. Required.")
   @Nonnull
   private DomainSpec spec = new DomainSpec();
 
@@ -92,7 +92,7 @@ public class Domain {
   @SerializedName("status")
   @Expose
   @Valid
-  @Description("The current status of the domain. Updated by the operator.")
+  @Description("The current status of the operation of the WebLogic domain. Updated automatically by the operator.")
   private DomainStatus status;
 
   @SuppressWarnings({"rawtypes"})
@@ -220,16 +220,16 @@ public class Domain {
     return getEffectiveConfigurationFactory().getAdminServerSpec();
   }
 
-  private EffectiveConfigurationFactory getEffectiveConfigurationFactory() {
-    return spec.getEffectiveConfigurationFactory(apiVersion, getResourceVersion());
+  public String getRestartVersion() {
+    return spec.getRestartVersion();
   }
 
-  private String getResourceVersion() {
-    Map<String, String> labels = metadata.getLabels();
-    if (labels == null) {
-      return VersionConstants.DEFAULT_DOMAIN_VERSION;
-    }
-    return labels.get(LabelConstants.RESOURCE_VERSION_LABEL);
+  public String getIntrospectVersion() {
+    return spec.getIntrospectVersion();
+  }
+
+  private EffectiveConfigurationFactory getEffectiveConfigurationFactory() {
+    return spec.getEffectiveConfigurationFactory(apiVersion);
   }
 
   /**
@@ -288,6 +288,26 @@ public class Domain {
   }
 
   /**
+   * Returns whether the specified cluster is allowed to have replica count below the minimum
+   * dynamic cluster size configured in WebLogic domain configuration.
+   *
+   * @param clusterName the name of the cluster
+   * @return whether the specified cluster is allowed to have replica count below the minimum
+   *     dynamic cluster size configured in WebLogic domain configuration
+   */
+  public boolean isAllowReplicasBelowMinDynClusterSize(String clusterName) {
+    return getEffectiveConfigurationFactory().isAllowReplicasBelowMinDynClusterSize(clusterName);
+  }
+
+  public int getMaxConcurrentStartup(String clusterName) {
+    return getEffectiveConfigurationFactory().getMaxConcurrentStartup(clusterName);
+  }
+
+  public int getMaxConcurrentShutdown(String clusterName) {
+    return getEffectiveConfigurationFactory().getMaxConcurrentShutdown(clusterName);
+  }
+
+  /**
    * DomainSpec is a description of a domain.
    *
    * @return Specification
@@ -337,12 +357,51 @@ public class Domain {
   }
 
   /**
-   * Name of the secret containing WebLogic startup credentials username and password.
+   * DomainStatus represents information about the status of a domain. Status may trail the actual
+   * state of a system.
+   *
+   * @param status Status
+   * @return this instance
+   */
+  public Domain withStatus(DomainStatus status) {
+    this.status = status;
+    return this;
+  }
+
+  /**
+   * Name of the secret containing WebLogic startup credentials user name and password.
    *
    * @return the secret name
    */
   public String getWebLogicCredentialsSecretName() {
     return spec.getWebLogicCredentialsSecret().getName();
+  }
+
+  /**
+   * Reference to secret opss key passphrase.
+   *
+   * @return opss key passphrase
+   */
+  public String getOpssWalletPasswordSecret() {
+    return spec.getOpssWalletPasswordSecret();
+  }
+
+  /**
+   * Returns the opss wallet file secret.
+   *
+   * @return opss wallet file secret.
+   */
+  public String getOpssWalletFileSecret() {
+    return spec.getOpssWalletFileSecret();
+  }
+
+  /**
+   * Reference to runtime encryption secret.
+   *
+   * @return runtime encryption secret
+   */
+  public String getRuntimeEncryptionSecret() {
+    return spec.getRuntimeEncryptionSecret();
   }
 
   /**
@@ -369,19 +428,39 @@ public class Domain {
   }
 
   boolean isLogHomeEnabled() {
-    return spec.isLogHomeEnabled();
+    return Optional.ofNullable(spec.isLogHomeEnabled()).orElse(getDomainHomeSourceType().hasLogHomeByDefault());
   }
 
   public String getDataHome() {
     return spec.getDataHome();
   }
 
+  public String getWdtDomainType() {
+    return spec.getWdtDomainType();
+  }
+
   public boolean isIncludeServerOutInPodLog() {
     return spec.getIncludeServerOutInPodLog();
   }
 
-  boolean isDomainHomeInImage() {
-    return spec.isDomainHomeInImage();
+  /**
+   * Returns a description of how the domain is defined.
+   * @return source type
+   */
+  public DomainSourceType getDomainHomeSourceType() {
+    return spec.getDomainHomeSourceType();
+  }
+
+  public boolean isNewIntrospectionRequiredForNewServers() {
+    return getDomainHomeSourceType() == DomainSourceType.FromModel;
+  }
+
+  public Model getModel() {
+    return spec.getModel();
+  }
+
+  public boolean isHttpAccessLogInLogHome() {
+    return spec.getHttpAccessLogInLogHome();
   }
 
   public boolean isIstioEnabled() {
@@ -393,20 +472,12 @@ public class Domain {
   }
 
   /**
-   * Returns the domain home.
-   *
-   * <p>Defaults to either /u01/oracle/user_projects/domains or /shared/domains/domainUID
+   * Returns the domain home. May be null, but will not be an empty string.
    *
    * @return domain home
    */
   public String getDomainHome() {
-    if (spec.getDomainHome() != null) {
-      return spec.getDomainHome();
-    }
-    if (spec.isDomainHomeInImage()) {
-      return "/u01/oracle/user_projects/domains";
-    }
-    return "/shared/domains/" + getDomainUid();
+    return Strings.emptyToNull(spec.getDomainHome());
   }
 
   public boolean isShuttingDown() {
@@ -432,12 +503,52 @@ public class Domain {
   }
 
   /**
+   * Returns the strategy for applying changes to configuration overrides.
+   * @return the selected strategy
+   */
+  public OverrideDistributionStrategy getOverrideDistributionStrategy() {
+    return spec.getOverrideDistributionStrategy();
+  }
+
+  /**
+   * Returns the strategy for applying changes to configuration overrides.
+   * @return the selected strategy
+   */
+  public boolean distributeOverridesDynamically() {
+    return spec.getOverrideDistributionStrategy() == OverrideDistributionStrategy.DYNAMIC;
+  }
+
+  /**
+   * Returns the value of the introspector job active deadline.
+   *
+   * @return value of the deadline in seconds.
+   */
+  public Long getIntrospectorJobActiveDeadlineSeconds() {
+    return Optional.ofNullable(spec.getConfiguration())
+        .map(Configuration::getIntrospectorJobActiveDeadlineSeconds).orElse(null);
+  }
+
+  public String getWdtConfigMap() {
+    return spec.getWdtConfigMap();
+  }
+
+  /**
    * Returns a list of Kubernetes secret names used in optional configuration overrides.
    *
    * @return list of Kubernetes secret names
    */
   public List<String> getConfigOverrideSecrets() {
-    return spec.getConfigOverrideSecrets();
+    return Optional.ofNullable(spec.getConfiguration())
+        .map(Configuration::getSecrets).orElse(spec.getConfigOverrideSecrets());
+  }
+
+  /**
+   * Returns the model home directory of the domain.
+   *
+   * @return model home directory
+   */
+  public String getModelHome() {
+    return spec.getModelHome();
   }
 
   @Override
@@ -495,7 +606,10 @@ public class Domain {
       addUnmappedLogHome();
       addReservedEnvironmentVariables();
       addMissingSecrets(kubernetesResources);
+      addIllegalSitConfigForMii();
       verifyNoAlternateSecretNamespaceSpecified();
+      addMissingModelConfigMap(kubernetesResources);
+      verifyIstioExposingDefaultChannel();
 
       return failures;
     }
@@ -573,6 +687,29 @@ public class Domain {
       }
     }
 
+    private void addIllegalSitConfigForMii() {
+      if (getDomainHomeSourceType() == DomainSourceType.FromModel
+          && getConfigOverrides() != null) {
+        failures.add(DomainValidationMessages.illegalSitConfigForMii(getConfigOverrides()));
+      }
+    }
+
+    private void verifyIstioExposingDefaultChannel() {
+      if (spec.isIstioEnabled()) {
+        Optional.ofNullable(spec.getAdminServer())
+            .map(AdminServer::getAdminService)
+            .map(AdminService::getChannels)
+            .ifPresent(cs -> cs.forEach(this::checkForDefaultNameExposed));
+      }
+    }
+
+    private void checkForDefaultNameExposed(Channel channel) {
+      if ("default".equals(channel.getChannelName()) || "default-admin".equals(channel.getChannelName())
+            || "default-secure".equals(channel.getChannelName())) {
+        failures.add(DomainValidationMessages.cannotExposeDefaultChannelIstio(channel.getChannelName()));
+      }
+    }
+
     private void addReservedEnvironmentVariables() {
       checkReservedIntrospectorVariables(spec, "spec");
       Optional.ofNullable(spec.getAdminServer())
@@ -625,19 +762,32 @@ public class Domain {
       for (String secretName : getConfigOverrideSecrets()) {
         verifySecretExists(resourceLookup, secretName, SecretType.ConfigOverride);
       }
+
+      verifySecretExists(resourceLookup, getOpssWalletPasswordSecret(), SecretType.OpssWalletPassword);
+      verifySecretExists(resourceLookup, getOpssWalletFileSecret(), SecretType.OpssWalletFile);
+
+      if (getDomainHomeSourceType() == DomainSourceType.FromModel) {
+        if (getRuntimeEncryptionSecret() == null) {
+          failures.add(DomainValidationMessages.missingRequiredSecret(
+              "spec.configuration.model.runtimeEncryptionSecret"));
+        } else {
+          verifySecretExists(resourceLookup, getRuntimeEncryptionSecret(), SecretType.RuntimeEncryption);
+        }
+        if (ModelInImageDomainType.JRF.toString().equals(getWdtDomainType()) 
+            && getOpssWalletPasswordSecret() == null) {
+          failures.add(DomainValidationMessages.missingRequiredOpssSecret(
+              "spec.configuration.opss.walletPasswordSecret"));
+        }
+      }
     }
 
     private List<V1LocalObjectReference> getImagePullSecrets() {
       return spec.getImagePullSecrets();
     }
 
-    private List<String> getConfigOverrideSecrets() {
-      return spec.getConfigOverrideSecrets();
-    }
-
     @SuppressWarnings("SameParameterValue")
     private void verifySecretExists(KubernetesResourceLookup resources, String secretName, SecretType type) {
-      if (!resources.isSecretExists(secretName, getNamespace())) {
+      if (secretName != null && !resources.isSecretExists(secretName, getNamespace())) {
         failures.add(DomainValidationMessages.noSuchSecret(secretName, getNamespace(), type));
       }
     }
@@ -652,6 +802,18 @@ public class Domain {
       return Optional.ofNullable(spec.getWebLogicCredentialsSecret())
           .map(V1SecretReference::getNamespace)
           .orElse(getNamespace());
+    }
+
+    private void addMissingModelConfigMap(KubernetesResourceLookup resourceLookup) {
+      verifyModelConfigMapExists(resourceLookup, getWdtConfigMap());
+    }
+
+    @SuppressWarnings("SameParameterValue")
+    private void verifyModelConfigMapExists(KubernetesResourceLookup resources, String modelConfigMapName) {
+      if (getDomainHomeSourceType() == DomainSourceType.FromModel
+          && modelConfigMapName != null && !resources.isConfigMapExists(modelConfigMapName, getNamespace())) {
+        failures.add(DomainValidationMessages.noSuchModelConfigMap(modelConfigMapName, getNamespace()));
+      }
     }
 
   }

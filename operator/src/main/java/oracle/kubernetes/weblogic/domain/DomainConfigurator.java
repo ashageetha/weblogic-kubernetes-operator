@@ -14,6 +14,8 @@ import io.kubernetes.client.openapi.models.V1PodReadinessGate;
 import io.kubernetes.client.openapi.models.V1PodSecurityContext;
 import io.kubernetes.client.openapi.models.V1SecurityContext;
 import io.kubernetes.client.openapi.models.V1Toleration;
+import oracle.kubernetes.operator.DomainSourceType;
+import oracle.kubernetes.operator.OverrideDistributionStrategy;
 import oracle.kubernetes.weblogic.domain.model.Domain;
 import oracle.kubernetes.weblogic.domain.model.DomainSpec;
 
@@ -55,6 +57,11 @@ public abstract class DomainConfigurator {
    */
   public DomainConfigurator withDomainHomeInImage(boolean domainHomeInImage) {
     getDomainSpec().setDomainHomeInImage(domainHomeInImage);
+    return this;
+  }
+
+  public DomainConfigurator withDomainHomeSourceType(DomainSourceType domainHomeSourceType) {
+    getDomainSpec().setDomainHomeSourceType(domainHomeSourceType);
     return this;
   }
 
@@ -148,6 +155,34 @@ public abstract class DomainConfigurator {
   }
 
   /**
+   * Sets whether to write server HTTP access log files to the directory specified in
+   * logHome.
+   *
+   * @param httpAccessLogInLogHome boolean specifying whether to write server HTTP
+   *                               access log files to the logHome directory
+   * @return this object
+   */
+  public DomainConfigurator withHttpAccessLogInLogHome(boolean httpAccessLogInLogHome) {
+    getDomainSpec().setHttpAccessLogInLogHome(httpAccessLogInLogHome);
+    return this;
+  }
+
+  public DomainConfigurator withAllowReplicasBelowMinDynClusterSize(Boolean allowReplicasBelowMinDynClusterSize) {
+    getDomainSpec().setAllowReplicasBelowMinDynClusterSize(allowReplicasBelowMinDynClusterSize);
+    return this;
+  }
+
+  public DomainConfigurator withMaxConcurrentStartup(Integer maxConcurrentStartup) {
+    getDomainSpec().setMaxClusterConcurrentStartup(maxConcurrentStartup);
+    return this;
+  }
+
+  public DomainConfigurator withMaxConcurrentShutdown(Integer maxConcurrentShutdown) {
+    getDomainSpec().setMaxClusterConcurrentShutdown(maxConcurrentShutdown);
+    return this;
+  }
+
+  /**
    * Sets the WebLogic configuration overrides configmap name for the domain.
    *
    * @param configMapName Name of the Kubernetes configmap that contains the config overrides
@@ -162,6 +197,9 @@ public abstract class DomainConfigurator {
    * @return this object
    */
   public abstract DomainConfigurator withConfigOverrideSecrets(String... secretNames);
+
+  public abstract DomainConfigurator withConfigOverrideDistributionStrategy(
+        OverrideDistributionStrategy strategy);
 
   /**
    * Sets the default settings for the readiness probe. Any settings left null will default to the
@@ -322,6 +360,18 @@ public abstract class DomainConfigurator {
    */
   public abstract DomainConfigurator withRestartVersion(String restartVersion);
 
+
+  /**
+   * Tells the operator to start the introspect domain job.
+   *
+   * @since 2.0
+   * @param introspectVersion If present, every time this value is updated the operator will start
+   *     the introspect domain job.
+   * @return this object
+   */
+  public abstract DomainConfigurator withIntrospectVersion(String introspectVersion);
+
+
   /**
    * Defines a secret reference for the domain.
    * @param secretName the name of the secret
@@ -393,4 +443,59 @@ public abstract class DomainConfigurator {
    * @return this object
    */
   public abstract DomainConfigurator withToleration(V1Toleration toleration);
+
+  /**
+   * Add the introspector job active deadline.
+   *
+   * @param deadline the deadline value to be set to this DomainConfigurator
+   * @return this object
+   */
+  public abstract DomainConfigurator withIntrospectorJobActiveDeadlineSeconds(long deadline);
+
+  /**
+   * Add WDT model config map for the domain resource.
+   *
+   * @param configmap the configmap for WDT model
+   * @return this object
+   */
+  public abstract DomainConfigurator withModelConfigMap(String configmap);
+
+  /**
+   * Add model runtime encryption secret for the domain resource.
+   *
+   * @param secret the runtime encryption secret for WDT model
+   * @return this object
+   */
+  public abstract DomainConfigurator withRuntimeEncryptionSecret(String secret);
+
+  /**
+   * Add OPSS wallet password secret for the domain resource.
+   *
+   * @param secret the OPSS wallet password secret
+   * @return this object
+   */
+  public abstract DomainConfigurator withOpssWalletPasswordSecret(String secret);
+
+  /**
+   * Add OPSS wallet file secret for the domain resource.
+   *
+   * @param secret the OPSS wallet file secret
+   * @return this object
+   */
+  public abstract DomainConfigurator withOpssWalletFileSecret(String secret);
+
+  /**
+   * Add Istio for the domain resource.
+   *
+   * @return this object
+   */
+  public abstract DomainConfigurator withIstio();
+
+  /**
+   * Add domain type for the domain resource.
+   *
+   * @param type the domain type
+   * @return this object
+   */
+  public abstract DomainConfigurator withDomainType(String type);
 }

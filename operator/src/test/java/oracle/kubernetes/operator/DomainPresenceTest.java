@@ -7,13 +7,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 
 import com.meterware.simplestub.Memento;
 import com.meterware.simplestub.StaticStubSupport;
-import com.meterware.simplestub.Stub;
 import io.kubernetes.client.openapi.models.V1Event;
 import io.kubernetes.client.openapi.models.V1ObjectMeta;
 import io.kubernetes.client.openapi.models.V1ObjectReference;
@@ -35,8 +33,9 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import static com.meterware.simplestub.Stub.createStrictStub;
+import static com.meterware.simplestub.Stub.createStub;
 import static oracle.kubernetes.operator.LabelConstants.SERVERNAME_LABEL;
-import static oracle.kubernetes.operator.VersionConstants.DEFAULT_DOMAIN_VERSION;
 import static org.hamcrest.Matchers.anEmptyMap;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
@@ -50,19 +49,15 @@ public class DomainPresenceTest extends ThreadFactoryTestBase {
   private static final String NS = "default";
   private static final String UID = "UID1";
 
-  private List<Memento> mementos = new ArrayList<>();
-  private KubernetesTestSupport testSupport = new KubernetesTestSupport();
-  private Map<String, AtomicBoolean> isNamespaceStopping;
+  private final List<Memento> mementos = new ArrayList<>();
+  private final KubernetesTestSupport testSupport = new KubernetesTestSupport();
+  private Map<String, AtomicBoolean> namespaceStoppingMap;
 
   private static Memento installStub(Class<?> containingClass, String fieldName, Object newValue)
       throws NoSuchFieldException {
     return StaticStubSupport.install(containingClass, fieldName, newValue);
   }
 
-  /**
-   * Setup test environment.
-   * @throws Exception if StaticStubSupport fails to install
-   */
   @Before
   public void setUp() throws Exception {
     mementos.add(TestUtils.silenceOperatorLogger().withLogLevel(Level.OFF));
@@ -71,36 +66,28 @@ public class DomainPresenceTest extends ThreadFactoryTestBase {
     mementos.add(StubWatchFactory.install());
     mementos.add(installStub(ThreadFactorySingleton.class, "INSTANCE", this));
     mementos.add(StaticStubSupport.install(Main.class, "engine", testSupport.getEngine()));
-    testSupport.addContainerComponent("TF", ThreadFactory.class, this);
+    mementos.add(NoopWatcherStarter.install());
 
-    isNamespaceStopping = getStoppingVariable();
-    isNamespaceStopping.computeIfAbsent(NS, k -> new AtomicBoolean(true)).set(true);
+    namespaceStoppingMap = getStoppingVariable();
+    namespaceStoppingMap.computeIfAbsent(NS, k -> new AtomicBoolean(true)).set(true);
   }
 
   private Map<String, AtomicBoolean> getStoppingVariable() throws NoSuchFieldException {
-    Memento stoppingMemento = StaticStubSupport.preserve(Main.class, "isNamespaceStopping");
+    Memento stoppingMemento = StaticStubSupport.preserve(Main.class, "namespaceStoppingMap");
     return stoppingMemento.getOriginalValue();
   }
 
-  /**
-   * Cleanup test environment.
-   * @throws Exception if test support fails.
-   */
   @After
   public void tearDown() throws Exception {
-    isNamespaceStopping.computeIfAbsent(NS, k -> new AtomicBoolean(true)).set(true);
+    namespaceStoppingMap.computeIfAbsent(NS, k -> new AtomicBoolean(true)).set(true);
     shutDownThreads();
-
-    for (Memento memento : mementos) {
-      memento.revert();
-    }
-
+    mementos.forEach(Memento::revert);
     testSupport.throwOnCompletionFailure();
   }
 
   @Test
   public void whenNoPreexistingDomains_createEmptyDomainPresenceInfoMap() {
-    DomainProcessorStub dp = Stub.createStub(DomainProcessorStub.class);
+    DomainProcessorStub dp = createStub(DomainProcessorStub.class);
     testSupport.addComponent("DP", DomainProcessor.class, dp);
 
     readExistingResources();
@@ -150,7 +137,6 @@ public class DomainPresenceTest extends ThreadFactoryTestBase {
 
   private V1ObjectMeta createMetadata(String uid) {
     return new V1ObjectMeta()
-        .putLabelsItem(LabelConstants.RESOURCE_VERSION_LABEL, DEFAULT_DOMAIN_VERSION)
         .putLabelsItem(LabelConstants.DOMAINUID_LABEL, uid)
         .putLabelsItem(LabelConstants.CREATEDBYOPERATOR_LABEL, "true");
   }
@@ -169,7 +155,7 @@ public class DomainPresenceTest extends ThreadFactoryTestBase {
     V1Service service = createServerService(UID, NS, "admin");
     testSupport.defineResources(service);
 
-    DomainProcessorStub dp = Stub.createStub(DomainProcessorStub.class);
+    DomainProcessorStub dp = createStub(DomainProcessorStub.class);
     testSupport.addComponent("DP", DomainProcessor.class, dp);
 
     readExistingResources();
@@ -183,7 +169,7 @@ public class DomainPresenceTest extends ThreadFactoryTestBase {
     V1Pod pod = createPodResource(UID, NS, "admin");
     testSupport.defineResources(pod);
 
-    DomainProcessorStub dp = Stub.createStub(DomainProcessorStub.class);
+    DomainProcessorStub dp = createStub(DomainProcessorStub.class);
     testSupport.addComponent("DP", DomainProcessor.class, dp);
 
     readExistingResources();
@@ -205,7 +191,7 @@ public class DomainPresenceTest extends ThreadFactoryTestBase {
     addPodResource(UID, NS, "admin");
     addEventResource(UID, "admin", "ignore this event");
 
-    DomainProcessorStub dp = Stub.createStub(DomainProcessorStub.class);
+    DomainProcessorStub dp = createStub(DomainProcessorStub.class);
     testSupport.addComponent("DP", DomainProcessor.class, dp);
 
     readExistingResources();
@@ -233,7 +219,7 @@ public class DomainPresenceTest extends ThreadFactoryTestBase {
         new V1PersistentVolumeClaim().metadata(createMetadata(UID, NS, "claim1"));
     testSupport.defineResources(service1, service2, volume, claim);
 
-    isNamespaceStopping.get(NS).set(false);
+    namespaceStoppingMap.get(NS).set(false);
 
     readExistingResources();
 
@@ -247,13 +233,35 @@ public class DomainPresenceTest extends ThreadFactoryTestBase {
       return dpis;
     }
 
+
     @Override
-    public void makeRightDomainPresence(
-        DomainPresenceInfo info,
-        boolean explicitRecheck,
-        boolean isDeleting,
-        boolean isWillInterrupt) {
-      dpis.put(info.getDomainUid(), info);
+    public MakeRightDomainOperation createMakeRightOperation(DomainPresenceInfo liveInfo) {
+      return createStrictStub(MakeRightDomainOperationImpl.class, liveInfo, dpis);
+    }
+
+    abstract static class MakeRightDomainOperationImpl implements MakeRightDomainOperation {
+      private final DomainPresenceInfo info;
+      private final Map<String, DomainPresenceInfo> dpis;
+
+      MakeRightDomainOperationImpl(DomainPresenceInfo info, Map<String, DomainPresenceInfo> dpis) {
+        this.info = info;
+        this.dpis = dpis;
+      }
+
+      @Override
+      public MakeRightDomainOperation withExplicitRecheck() {
+        return this;
+      }
+
+      @Override
+      public MakeRightDomainOperation forDeletion() {
+        return this;
+      }
+
+      @Override
+      public void execute() {
+        dpis.put(info.getDomainUid(), info);
+      }
     }
   }
 }

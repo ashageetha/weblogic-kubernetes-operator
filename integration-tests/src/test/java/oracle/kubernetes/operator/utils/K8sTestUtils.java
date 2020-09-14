@@ -9,18 +9,24 @@ import java.util.logging.Level;
 
 import io.kubernetes.client.openapi.ApiException;
 import io.kubernetes.client.openapi.Configuration;
+import io.kubernetes.client.openapi.apis.ApiextensionsV1Api;
 import io.kubernetes.client.openapi.apis.ApiextensionsV1beta1Api;
+import io.kubernetes.client.openapi.apis.ApisApi;
 import io.kubernetes.client.openapi.apis.AppsV1Api;
 import io.kubernetes.client.openapi.apis.BatchV1Api;
 import io.kubernetes.client.openapi.apis.CoreV1Api;
 import io.kubernetes.client.openapi.apis.CustomObjectsApi;
-import io.kubernetes.client.openapi.apis.ExtensionsV1beta1Api;
+import io.kubernetes.client.openapi.apis.NetworkingV1beta1Api;
 import io.kubernetes.client.openapi.apis.RbacAuthorizationV1Api;
-import io.kubernetes.client.openapi.models.ExtensionsV1beta1IngressList;
+import io.kubernetes.client.openapi.models.NetworkingV1beta1IngressList;
+import io.kubernetes.client.openapi.models.V1APIGroup;
+import io.kubernetes.client.openapi.models.V1APIGroupList;
 import io.kubernetes.client.openapi.models.V1ClusterRoleBindingList;
 import io.kubernetes.client.openapi.models.V1ClusterRoleList;
 import io.kubernetes.client.openapi.models.V1ConfigMapList;
+import io.kubernetes.client.openapi.models.V1CustomResourceDefinition;
 import io.kubernetes.client.openapi.models.V1DeploymentList;
+import io.kubernetes.client.openapi.models.V1GroupVersionForDiscovery;
 import io.kubernetes.client.openapi.models.V1JobList;
 import io.kubernetes.client.openapi.models.V1ObjectMeta;
 import io.kubernetes.client.openapi.models.V1PersistentVolumeClaimList;
@@ -42,7 +48,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class K8sTestUtils {
 
-
   static {
     try {
       Configuration.setDefaultApiClient(ClientBuilder.defaultClient());
@@ -55,9 +60,11 @@ public class K8sTestUtils {
   private CoreV1Api coreV1Api = new CoreV1Api();
   private BatchV1Api batchV1Api = new BatchV1Api();
   private AppsV1Api appsV1Api = new AppsV1Api();
-  private ExtensionsV1beta1Api extensionsV1beta1Api = new ExtensionsV1beta1Api();
+  private NetworkingV1beta1Api networkingV1beta1Api = new NetworkingV1beta1Api();
   private RbacAuthorizationV1Api rbacAuthorizationV1Api = new RbacAuthorizationV1Api();
   private ApiextensionsV1beta1Api apiextensionsV1beta1Api = new ApiextensionsV1beta1Api();
+  private ApiextensionsV1Api apiextensionsV1Api = new ApiextensionsV1Api();
+  private ApisApi apisApi = new ApisApi();
 
   /**
    * verify domain CRD.
@@ -65,10 +72,26 @@ public class K8sTestUtils {
    */
   public void verifyDomainCrd() throws Exception {
     try {
-      V1beta1CustomResourceDefinition domainCrd =
+      V1APIGroupList apis = apisApi.getAPIVersions();
+      for (V1APIGroup group : apis.getGroups()) {
+        if ("apiextensions.k8s.io".equals(group.getName())) {
+          for (V1GroupVersionForDiscovery version : group.getVersions()) {
+            if ("v1".equals(version.getVersion())) {
+              // v1 is supported
+              V1CustomResourceDefinition domainCrd =
+                  apiextensionsV1Api.readCustomResourceDefinition(
+                      "domains.weblogic.oracle", null, null, null);
+              assertNotNull(domainCrd, "Domain CRD exists");
+              return;
+            }
+          }
+          break;
+        }
+      }
+      V1beta1CustomResourceDefinition domainBetaCrd =
           apiextensionsV1beta1Api.readCustomResourceDefinition(
               "domains.weblogic.oracle", null, null, null);
-      assertNotNull(domainCrd, "Domain CRD exists");
+      assertNotNull(domainBetaCrd, "Domain CRD exists");
     } catch (ApiException aex) {
       if (aex.getCode() == 404) {
         assertTrue(false, "Expected CRD domains.weblogic.oracle existed.");
@@ -248,8 +271,8 @@ public class K8sTestUtils {
   public void verifyIngresses(
       String domainNs, String domainUid, String labelSelectors, int expectedLabeled)
       throws Exception {
-    ExtensionsV1beta1IngressList labeledIngressList =
-        extensionsV1beta1Api.listIngressForAllNamespaces(
+    NetworkingV1beta1IngressList labeledIngressList =
+        networkingV1beta1Api.listIngressForAllNamespaces(
             Boolean.FALSE,
             null,
             null,
@@ -264,8 +287,8 @@ public class K8sTestUtils {
         labeledIngressList.getItems().size(), expectedLabeled, "Number of labeled ingress");
     labeledIngressList.getItems().stream()
         .forEach(li -> li.getMetadata().getNamespace().equals(domainNs));
-    ExtensionsV1beta1IngressList traefikIngressList =
-        extensionsV1beta1Api.listIngressForAllNamespaces(
+    NetworkingV1beta1IngressList traefikIngressList =
+        networkingV1beta1Api.listIngressForAllNamespaces(
             Boolean.FALSE,
             null,
             String.format("metadata.name=traefik-hostrouting-%s", domainUid),

@@ -3,24 +3,23 @@
 
 {{- define "operator.operatorClusterRoleGeneral" }}
 ---
-{{- if .dedicated }}
+{{- if (or .dedicated (eq .domainNamespaceSelectionStrategy "Dedicated")) }}
 kind: "Role"
 {{- else }}
 kind: "ClusterRole"
 {{- end }}
 apiVersion: "rbac.authorization.k8s.io/v1"
 metadata:
-  {{- if .dedicated }}
+  {{- if (or .dedicated (eq .domainNamespaceSelectionStrategy "Dedicated")) }}
   name: "weblogic-operator-role-general"
   namespace: {{ .Release.Namespace | quote }}
   {{- else }}
   name: {{ list .Release.Namespace "weblogic-operator-clusterrole-general" | join "-" | quote }}
   {{- end }}
   labels:
-    weblogic.resourceVersion: "operator-v2"
     weblogic.operatorName: {{ .Release.Namespace | quote }}
 rules:
-{{- if not .dedicated }}
+{{- if not (or .dedicated (eq .domainNamespaceSelectionStrategy "Dedicated")) }}
 - apiGroups: [""]
   resources: ["namespaces"]
   verbs: ["get", "list", "watch"]

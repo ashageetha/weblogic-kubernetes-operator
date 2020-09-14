@@ -3,7 +3,6 @@
 
 package oracle.kubernetes.operator;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,10 +19,11 @@ import io.kubernetes.client.openapi.models.V1JobCondition;
 import io.kubernetes.client.openapi.models.V1JobStatus;
 import io.kubernetes.client.openapi.models.V1ObjectMeta;
 import io.kubernetes.client.util.Watch;
+import io.kubernetes.client.util.Watchable;
 import oracle.kubernetes.operator.TuningParameters.WatchTuning;
 import oracle.kubernetes.operator.builders.WatchBuilder;
-import oracle.kubernetes.operator.builders.WatchI;
 import oracle.kubernetes.operator.helpers.CallBuilder;
+import oracle.kubernetes.operator.helpers.KubernetesUtils;
 import oracle.kubernetes.operator.helpers.ResponseStep;
 import oracle.kubernetes.operator.logging.LoggingFacade;
 import oracle.kubernetes.operator.logging.LoggingFactory;
@@ -36,7 +36,7 @@ import oracle.kubernetes.weblogic.domain.model.Domain;
 /** Watches for Jobs to become Ready or leave Ready state. */
 public class JobWatcher extends Watcher<V1Job> implements WatchListener<V1Job> {
   private static final LoggingFacade LOGGER = LoggingFactory.getLogger("Operator", "Operator");
-  private static final Map<String, JobWatcher> JOB_WATCHERS = new HashMap<>();
+  private static final Map<String, JobWatcher> JOB_WATCHERS = new ConcurrentHashMap<>();
   private static JobWatcherFactory factory;
 
   private final String namespace;
@@ -82,6 +82,17 @@ public class JobWatcher extends Watcher<V1Job> implements WatchListener<V1Job> {
 
   private static String getNamespace(Domain domain) {
     return domain.getMetadata().getNamespace();
+  }
+  
+  @Override
+  public String getNamespace() {
+    return namespace;
+  }
+
+  @Override
+  public String getDomainUid(Watch.Response<V1Job> item) {
+    return KubernetesUtils.getDomainUidLabel(
+        Optional.ofNullable(item.object).map(V1Job::getMetadata).orElse(null));
   }
 
   /**
@@ -170,7 +181,7 @@ public class JobWatcher extends Watcher<V1Job> implements WatchListener<V1Job> {
   }
 
   @Override
-  public WatchI<V1Job> initiateWatch(WatchBuilder watchBuilder) throws ApiException {
+  public Watchable<V1Job> initiateWatch(WatchBuilder watchBuilder) throws ApiException {
     return watchBuilder
         .withLabelSelectors(LabelConstants.DOMAINUID_LABEL, LabelConstants.CREATEDBYOPERATOR_LABEL)
         .createJobWatch(namespace);
@@ -244,6 +255,9 @@ public class JobWatcher extends Watcher<V1Job> implements WatchListener<V1Job> {
     private WaitForJobReadyStep(V1Job job, Step next) {
       super(job, next);
       jobCreationTime = getCreationTime(job);
+      V1ObjectMeta metadata = job.getMetadata();
+      LOGGER.info(MessageKeys.JOB_CREATION_TIMESTAMP_MESSAGE, metadata.getName(),
+          metadata.getCreationTimestamp());
     }
 
     // A job is considered ready once it has either successfully completed, or been marked as failed.
@@ -283,8 +297,8 @@ public class JobWatcher extends Watcher<V1Job> implements WatchListener<V1Job> {
     }
 
     @Override
-    Step createReadAsyncStep(String name, String namespace, ResponseStep<V1Job> responseStep) {
-      return new CallBuilder().readJobAsync(name, namespace, responseStep);
+    Step createReadAsyncStep(String name, String namespace, String domainUid, ResponseStep<V1Job> responseStep) {
+      return new CallBuilder().readJobAsync(name, namespace, domainUid, responseStep);
     }
 
     // When we detect a job as ready, we add it to the packet for downstream processing.
@@ -298,7 +312,7 @@ public class JobWatcher extends Watcher<V1Job> implements WatchListener<V1Job> {
     // be available for reading
     @Override
     boolean shouldTerminateFiber(V1Job job) {
-      return isFailed(job) && "DeadlineExceeded".equals(getFailedReason(job));
+      return isFailed(job) && ("DeadlineExceeded".equals(getFailedReason(job)));
     }
 
     // create an exception to terminate the fiber
@@ -309,7 +323,7 @@ public class JobWatcher extends Watcher<V1Job> implements WatchListener<V1Job> {
 
     @Override
     void logWaiting(String name) {
-      LOGGER.info(MessageKeys.WAITING_FOR_JOB_READY, name);
+      LOGGER.fine(MessageKeys.WAITING_FOR_JOB_READY, name);
     }
   }
 
@@ -322,7 +336,7 @@ public class JobWatcher extends Watcher<V1Job> implements WatchListener<V1Job> {
     }
 
     public String toString() {
-      return LOGGER.getFormattedMessage(
+      return LOGGER.formatMessage(
           MessageKeys.JOB_DEADLINE_EXCEEDED_MESSAGE,
           job.getMetadata().getName(),
           job.getSpec().getActiveDeadlineSeconds(),

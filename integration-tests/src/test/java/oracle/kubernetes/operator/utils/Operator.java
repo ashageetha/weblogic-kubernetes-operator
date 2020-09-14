@@ -67,7 +67,7 @@ public class Operator {
    * @param inputMap       input
    * @param opNS           opNS
    * @param opSA           opSA
-   * @param targetdomainNS target
+   * @param domainNamespaces target
    * @param restCertType   cert
    * @throws Exception exception
    */
@@ -75,11 +75,11 @@ public class Operator {
       Map<String, Object> inputMap,
       boolean opNS,
       boolean opSA,
-      boolean targetdomainNS,
+      boolean domainNamespaces,
       RestCertType restCertType)
       throws Exception {
     this.restCertType = restCertType;
-    initialize(inputMap, opNS, opSA, targetdomainNS);
+    initialize(inputMap, opNS, opSA, domainNamespaces);
     generateInputYaml();
   }
 
@@ -219,7 +219,8 @@ public class Operator {
    * @throws Exception exception
    */
   public void destroy() throws Exception {
-    String cmd = "helm del --purge " + operatorMap.get("releaseName");
+    String cmd = "helm uninstall " + operatorMap.get("releaseName") + " --namespace " + operatorMap.get("namespace");
+
     ExecResult result = ExecCommand.exec(cmd);
     if (result.exitValue() != 0) {
       throw new RuntimeException(
@@ -298,6 +299,7 @@ public class Operator {
 
   /**
    * Call Helm install.
+   *
    * @throws Exception on failure
    */
   public void callHelmInstall() throws Exception {
@@ -308,7 +310,7 @@ public class Operator {
     StringBuffer cmd = new StringBuffer("");
     if (operatorMap.containsKey("operatorGitVersion")
         && operatorMap.containsKey("operatorGitVersionDir")) {
-      TestUtils.exec(
+      TestUtils.execOrAbortProcess(
           "cd "
               + operatorMap.get("operatorGitVersionDir")
               + " && git clone -b "
@@ -316,22 +318,27 @@ public class Operator {
               + " https://github.com/oracle/weblogic-kubernetes-operator");
       cmd.append("cd ");
       cmd.append(operatorMap.get("operatorGitVersionDir"))
-          .append("/weblogic-kubernetes-operator")
-          .append(" && helm install kubernetes/charts/weblogic-operator ");
+          .append("/weblogic-kubernetes-operator");
+
+      cmd.append(" && helm install ")
+          .append(operatorMap.get("releaseName"))
+          .append(" kubernetes/charts/weblogic-operator");
     } else {
       cmd.append("cd ");
-      cmd.append(BaseTest.getProjectRoot())
-          .append(" && helm install kubernetes/charts/weblogic-operator ");
+      cmd.append(BaseTest.getProjectRoot());
+      cmd.append(" && helm install ")
+          .append(operatorMap.get("releaseName"))
+          .append(" kubernetes/charts/weblogic-operator");
     }
-    cmd.append(" --name ")
-        .append(operatorMap.get("releaseName"))
-        .append(" --values ")
+    cmd.append(" --values ")
         .append(generatedInputYamlFile)
         .append(" --namespace ")
         .append(operatorNS)
         .append(" --set \"imagePullPolicy=")
         .append(imagePullPolicy)
-        .append("\" --wait --timeout 180");
+        .append("\" ");
+    cmd.append(" --wait --timeout 3m0s");
+
     LoggerHelper.getLocal().log(Level.INFO, "Running " + cmd);
     ExecResult result = ExecCommand.exec(cmd.toString());
     if (result.exitValue() != 0) {
@@ -343,6 +350,7 @@ public class Operator {
 
   /**
    * Call Helm upgrade.
+   *
    * @param upgradeSet upgrade properties
    * @throws Exception on failure
    */
@@ -354,8 +362,11 @@ public class Operator {
         .append(" kubernetes/charts/weblogic-operator ")
         .append(" --set \"")
         .append(upgradeSet)
-        .append("\" --reuse-values ")
-        .append(" --wait --timeout 180");
+        .append("\" --reuse-values ");
+    cmd.append("--namespace ")
+        .append(operatorMap.get("namespace"))
+        .append(" --wait --timeout 3m0s");
+
     LoggerHelper.getLocal().log(Level.INFO, "Running " + cmd);
     ExecResult result = ExecCommand.exec(cmd.toString());
     if (result.exitValue() != 0) {
@@ -367,6 +378,7 @@ public class Operator {
 
   /**
    * get Helm values.
+   *
    * @return values
    * @throws Exception on failure
    */
@@ -376,6 +388,7 @@ public class Operator {
         .append(" && helm get values ")
         .append(operatorMap.get("releaseName"));
 
+    cmd.append(" --namespace " + operatorMap.get("namespace"));
     LoggerHelper.getLocal().log(Level.INFO, "Running " + cmd);
     ExecResult result = ExecCommand.exec(cmd.toString());
     if (result.exitValue() != 0) {
@@ -466,7 +479,7 @@ public class Operator {
   }
 
   private void initialize(
-      Map<String, Object> inputMap, boolean opNS, boolean opSA, boolean targetdomainNS)
+      Map<String, Object> inputMap, boolean opNS, boolean opSA, boolean domainNamespaces)
       throws Exception {
     operatorMap = inputMap;
     userProjectsDir = (String) operatorMap.get("userProjectsDir");
@@ -479,7 +492,7 @@ public class Operator {
       ExecCommand.exec("kubectl --grace-period=1 --timeout=1s delete namespace " + operatorNS + " --ignore-not-found");
       Thread.sleep(10000);
       // create operator namespace
-      TestUtils.exec("kubectl create namespace " + operatorNS, true);
+      ExecCommand.exec("kubectl create namespace " + operatorNS);
     }
     if (opSA) {
       // create operator service account
@@ -499,13 +512,13 @@ public class Operator {
         }
       }
     }
-    if (targetdomainNS) {
+    if (domainNamespaces) {
       // create domain namespaces
 
-      ArrayList<String> domainNamespaces = (ArrayList<String>) operatorMap.get("domainNamespaces");
-      if (domainNamespaces != null) {
-        for (int i = 0; i < domainNamespaces.size(); i++) {
-          String domainNS = domainNamespaces.get(i);
+      ArrayList<String> dns = (ArrayList<String>) operatorMap.get("domainNamespaces");
+      if (dns != null) {
+        for (int i = 0; i < dns.size(); i++) {
+          String domainNS = dns.get(i);
           LoggerHelper.getLocal().log(Level.INFO, "domainNamespace " + domainNS);
           if (!domainNS.equals("default")) {
             LoggerHelper.getLocal().log(Level.INFO, "Creating domain namespace " + domainNS);
@@ -576,7 +589,7 @@ public class Operator {
     String cmd = "kubectl scale --replicas=0 deployment/weblogic-operator" + " -n " + operatorNS;
     LoggerHelper.getLocal().log(Level.INFO, "Undeploy Operator using command:\n" + cmd);
 
-    ExecResult result = TestUtils.exec(cmd);
+    ExecResult result = TestUtils.execOrAbortProcess(cmd);
 
     LoggerHelper.getLocal().log(Level.INFO, "stdout : \n" + result.stdout());
 
@@ -593,7 +606,7 @@ public class Operator {
     String cmd = "kubectl scale --replicas=1 deployment/weblogic-operator" + " -n " + operatorNS;
     LoggerHelper.getLocal().log(Level.INFO, "Deploy Operator using command:\n" + cmd);
 
-    ExecResult result = TestUtils.exec(cmd);
+    ExecResult result = TestUtils.execOrAbortProcess(cmd);
 
     LoggerHelper.getLocal().log(Level.INFO, "Checking if operator pod is running");
     verifyPodCreated();
@@ -624,9 +637,9 @@ public class Operator {
             + getOperatorNamespace()
             + " -o jsonpath=\"{.items[0].metadata.name}\"";
     LoggerHelper.getLocal().log(Level.INFO, "Command to query Operator pod name: " + cmd);
-    ExecResult result = TestUtils.exec(cmd);
+    ExecResult result = TestUtils.execOrAbortProcess(cmd);
 
-    return result.stdout();
+    return result.stdout().trim();
   }
 
   public static enum RestCertType {
@@ -641,4 +654,25 @@ public class Operator {
     NONE
   }
 
+  /**
+   * writes operator pod describe and logs to a file.
+   *
+   * @param logLocation - location where the logs to be written
+   */
+  public void writePodLog(String logLocation) throws Exception {
+    //create dir
+    TestUtils.execOrAbortProcess("mkdir -p " + logLocation);
+
+    //write operator pod describe
+    String cmd = "kubectl describe pod " + getOperatorPodName() + " -n "
+        + getOperatorNamespace() + " >> " + logLocation
+        + "/pod-describe." + operatorNS + "." + getOperatorPodName();
+    ExecCommand.exec(cmd);
+
+    //write operator pod logs
+    cmd = "kubectl logs pod/" + getOperatorPodName() + " -n "
+        + getOperatorNamespace() + " >> " + logLocation
+        + "/pod-log." + operatorNS + "." + getOperatorPodName();
+    ExecCommand.exec(cmd);
+  }
 }

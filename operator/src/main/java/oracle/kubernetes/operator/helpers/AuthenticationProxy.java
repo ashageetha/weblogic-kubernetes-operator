@@ -42,28 +42,20 @@ public class AuthenticationProxy {
       if (allowed) {
         result = new CallBuilder().createTokenReview(prepareTokenReview(token));
       } else {
-        LOGGER.info(MessageKeys.CANNOT_CREATE_TOKEN_REVIEW);
+        LOGGER.warning(MessageKeys.CANNOT_CREATE_TOKEN_REVIEW);
       }
     } catch (ApiException e) {
       LOGGER.severe(MessageKeys.APIEXCEPTION_FROM_TOKEN_REVIEW, e);
       LOGGER.exiting(null);
       return null;
     }
-    LOGGER.info("Returned TokenReview", result);
+    LOGGER.fine("Returned TokenReview", result);
     V1TokenReviewStatus status = result != null ? result.getStatus() : null;
     LOGGER.exiting(status);
     return status;
   }
 
   private V1TokenReview prepareTokenReview(String token) {
-    LOGGER.entering();
-    V1TokenReviewSpec spec = new V1TokenReviewSpec();
-    spec.setToken(token);
-    V1TokenReview tokenReview = new V1TokenReview();
-    tokenReview.setSpec(spec);
-    // Can't just log token review since it prints out the token, which is sensitive data.
-    // It doesn't contain any other useful data, so don't log any return info.
-    LOGGER.exiting();
-    return tokenReview;
+    return new V1TokenReview().spec(new V1TokenReviewSpec().token(token));
   }
 }

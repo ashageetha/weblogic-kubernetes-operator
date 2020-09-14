@@ -4,12 +4,12 @@
 package oracle.kubernetes.operator.calls;
 
 import io.kubernetes.client.openapi.ApiException;
-import oracle.kubernetes.operator.calls.unprocessable.UnprocessableEntityBuilder;
+import oracle.kubernetes.operator.calls.unprocessable.UnrecoverableErrorBuilderImpl;
 
 public class UnrecoverableErrorBuilder {
 
   /**
-   * Returns true if the specified call response indicates an unprocessable entity response from Kubernetes.
+   * Returns true if the specified call response indicates an unrecoverable response from Kubernetes.
    * @param callResponse the response from a Kubernetes call
    * @param <T> call response type
    * @return true if an unprocessable entity failure has been reported
@@ -19,19 +19,25 @@ public class UnrecoverableErrorBuilder {
   }
 
   private static boolean isUnrecoverable(ApiException e) {
-    return ForbiddenErrorBuilder.isForbiddenOperation(e) || UnprocessableEntityBuilder.isUnprocessableEntity(e);
+    return UnrecoverableErrorBuilderImpl.isUnrecoverable(e);
   }
 
   /**
-   * Populate FailureStatusSource from an ApiException.
-   * @param apiException the source exception
+   * Populate FailureStatusSource from a failed call response.
+   * @param callResponse the failed call response
    * @return status source object
    */
-  public static FailureStatusSource fromException(ApiException apiException) {
-    if (UnprocessableEntityBuilder.isUnprocessableEntity(apiException)) {
-      return UnprocessableEntityBuilder.fromException(apiException);
-    } else {
-      return ForbiddenErrorBuilder.fromException(apiException);
-    }
+  public static FailureStatusSource fromFailedCall(CallResponse callResponse) {
+    return UnrecoverableErrorBuilderImpl.fromFailedCall(callResponse);
+  }
+
+  /**
+   * Throws FailureStatusSourceException generated from a failed call response.
+   * @param callResponse the failed call response
+   * @return exception bearing status source object
+   */
+  public static FailureStatusSourceException createExceptionFromFailedCall(CallResponse callResponse) {
+    ApiException apiException = callResponse.getE();
+    return new FailureStatusSourceException(fromFailedCall(callResponse), apiException);
   }
 }

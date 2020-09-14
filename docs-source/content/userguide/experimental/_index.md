@@ -3,11 +3,11 @@ title: "Experimental features"
 date: 2019-08-15T13:29:04-04:00
 weight: 6
 description: "Learn about experimental features included in the operator."
-draft: false
+draft: true
 ---
 
 This section provides details of experimental features in the operator.
-These are features that are not considered "complete" but which are
+These features are not considered "complete" but are
 included as a "preview" to allow users to experiment with them and
 give feedback.
 

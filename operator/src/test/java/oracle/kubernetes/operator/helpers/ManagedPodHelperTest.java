@@ -10,12 +10,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import io.kubernetes.client.openapi.models.V1Affinity;
 import io.kubernetes.client.openapi.models.V1Container;
 import io.kubernetes.client.openapi.models.V1EnvVar;
+import io.kubernetes.client.openapi.models.V1LabelSelector;
+import io.kubernetes.client.openapi.models.V1LabelSelectorRequirement;
 import io.kubernetes.client.openapi.models.V1Pod;
+import io.kubernetes.client.openapi.models.V1PodAffinityTerm;
+import io.kubernetes.client.openapi.models.V1PodAntiAffinity;
+import io.kubernetes.client.openapi.models.V1PodSpec;
+import io.kubernetes.client.openapi.models.V1WeightedPodAffinityTerm;
 import oracle.kubernetes.operator.LabelConstants;
 import oracle.kubernetes.operator.ProcessingConstants;
-import oracle.kubernetes.operator.VersionConstants;
 import oracle.kubernetes.operator.work.FiberTestSupport;
 import oracle.kubernetes.operator.work.Packet;
 import oracle.kubernetes.operator.work.Step.StepAndPacket;
@@ -772,27 +778,19 @@ public class ManagedPodHelperTest extends PodHelperTestBase {
   @Test
   public void whenPodHasCustomLabelConflictWithInternal_createManagedPodWithInternal() {
     getConfigurator()
-        .withPodLabel(LabelConstants.RESOURCE_VERSION_LABEL, "domain-label-value1")
         .configureServer((SERVER_NAME))
         .withPodLabel(LabelConstants.CREATEDBYOPERATOR_LABEL, "server-label-value1");
 
     Map<String, String> podLabels = getCreatedPod().getMetadata().getLabels();
-    assertThat(
-        podLabels,
-        hasEntry(LabelConstants.RESOURCE_VERSION_LABEL, VersionConstants.DEFAULT_DOMAIN_VERSION));
     assertThat(podLabels, hasEntry(LabelConstants.CREATEDBYOPERATOR_LABEL, "true"));
   }
 
   @Test
   public void whenClusterHasAffinity_createPodWithIt() {
-    getConfigurator()
-        .configureCluster(CLUSTER_NAME)
-        .withAffinity(affinity);
+    getConfigurator().configureCluster(CLUSTER_NAME).withAffinity(affinity);
     testSupport.addToPacket(ProcessingConstants.CLUSTER_NAME, CLUSTER_NAME);
 
-    assertThat(
-        getCreatedPod().getSpec().getAffinity(),
-        is(affinity));
+    assertThat(getCreatePodAffinity(), is(affinity));
   }
 
   @Test
@@ -906,6 +904,64 @@ public class ManagedPodHelperTest extends PodHelperTestBase {
     containers.forEach(c -> assertThat(c.getResources().getRequests(), hasResourceQuantity("memory", "250m")));
   }
 
+  @Test
+  public void whenClusterHasAffinityWithVariables_createManagedPodWithSubstitutions() {
+    testSupport.addToPacket(ProcessingConstants.CLUSTER_NAME, CLUSTER_NAME);
+    getConfigurator()
+        .configureCluster(CLUSTER_NAME)
+        .withAffinity(
+            new V1Affinity().podAntiAffinity(
+                new V1PodAntiAffinity().preferredDuringSchedulingIgnoredDuringExecution(
+                    Collections.singletonList(
+                          createWeightedPodAffinityTerm("weblogic.clusterName", "$(CLUSTER_NAME)")))));
+
+    V1Affinity expectedValue = new V1Affinity().podAntiAffinity(
+        new V1PodAntiAffinity().preferredDuringSchedulingIgnoredDuringExecution(
+            Collections.singletonList(
+                  createWeightedPodAffinityTerm("weblogic.clusterName", CLUSTER_NAME))));
+
+    assertThat(getCreatePodAffinity(), is(expectedValue));
+  }
+
+  V1Affinity getCreatePodAffinity() {
+    return Optional.ofNullable(getCreatedPod().getSpec()).map(V1PodSpec::getAffinity).orElse(new V1Affinity());
+  }
+
+  V1WeightedPodAffinityTerm createWeightedPodAffinityTerm(String key, String valuesItem) {
+    return new V1WeightedPodAffinityTerm().weight(100).podAffinityTerm(
+          new V1PodAffinityTerm().labelSelector(
+                new V1LabelSelector().matchExpressions(
+                      Collections.singletonList(new V1LabelSelectorRequirement()
+                            .key(key)
+                            .operator("In")
+                            .addValuesItem(valuesItem))))
+                .topologyKey("kubernetes.io/hostname"));
+  }
+
+  @Test
+  public void whenDomainAndClusterBothHaveAffinityWithVariables_createManagedPodWithSubstitutions() {
+    testSupport.addToPacket(ProcessingConstants.CLUSTER_NAME, CLUSTER_NAME);
+    getConfigurator()
+        .withAffinity(
+            new V1Affinity().podAntiAffinity(
+                new V1PodAntiAffinity().preferredDuringSchedulingIgnoredDuringExecution(
+                    Collections.singletonList(
+                          createWeightedPodAffinityTerm("weblogic.domainUID", "$(DOMAIN_UID)")))))
+        .configureCluster(CLUSTER_NAME)
+        .withAffinity(
+            new V1Affinity().podAntiAffinity(
+                new V1PodAntiAffinity().preferredDuringSchedulingIgnoredDuringExecution(
+                    Collections.singletonList(
+                          createWeightedPodAffinityTerm("weblogic.clusterName", "$(CLUSTER_NAME)")))));
+
+    V1Affinity expectedValue = new V1Affinity().podAntiAffinity(
+        new V1PodAntiAffinity().preferredDuringSchedulingIgnoredDuringExecution(
+            Arrays.asList(
+                  createWeightedPodAffinityTerm("weblogic.clusterName", CLUSTER_NAME),
+                  createWeightedPodAffinityTerm("weblogic.domainUID", UID))));
+
+    assertThat(getCreatePodAffinity(), is(expectedValue));
+  }
 
   @Override
   void setServerPort(int port) {
@@ -939,6 +995,10 @@ public class ManagedPodHelperTest extends PodHelperTestBase {
 
   @Override
   V1Pod createPod(Packet packet) {
+    return createManagedServerPodModel(packet);
+  }
+
+  private static V1Pod createManagedServerPodModel(Packet packet) {
     return new PodHelper.ManagedPodStepContext(null, packet).getPodModel();
   }
 }
