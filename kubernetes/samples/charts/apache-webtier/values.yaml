@@ -23,7 +23,7 @@ imagePullPolicy: "IfNotPresent"
 # mount be disabled and, thereforem the built-in Apache plugin config be used.
 # Use this to provide your own Apache webtier configuration as needed; simply define this 
 # path and put your own custom_mod_wl_apache.conf file under this path.
-volumePath:
+persistentVolumeClaimName:
 
 # Boolean indicating if RBAC resources should be created
 createRBAC: true
@@ -32,7 +32,7 @@ createRBAC: true
 httpNodePort: 30305
 
 # NodePort to expose for https access
-httpsNodePort: 30443
+httpsNodePort: 30445
 
 # The VirtualHostName of the Apache HTTP server. It is used to enable custom SSL configuration.
 # If it is set, the Apache HTTP Server is configured to listen to port 4433 for SSL traffic.
@@ -74,4 +74,6 @@ managedServerPort: 8001
 # where 'myhost' is the IP of the machine that runs the Apache web tier, and 
 #       'myport' is the port that the Apache web tier is publicly exposed to.
 location: "/weblogic"
+# Type of Deployment usePriviledgedPorts / useNonPriviledgedPorts
+useNonPriviledgedPorts: false
 
