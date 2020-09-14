@@ -145,5 +145,5 @@ $ curl -k --silent https://${HOSTNAME}:30443/weblogic2/testwebapp/
 
 ## 9. Uninstall the Apache webtier
 ```
-$ helm delete my-release
+$ helm uninstall my-release --namespace apache-sample
 ```
