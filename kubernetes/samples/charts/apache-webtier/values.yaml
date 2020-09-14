@@ -32,7 +32,7 @@ createRBAC: true
 httpNodePort: 30305
 
 # NodePort to expose for https access
-httpsNodePort: 30445
+httpsNodePort: 30443
 
 # The VirtualHostName of the Apache HTTP server. It is used to enable custom SSL configuration.
 # If it is set, the Apache HTTP Server is configured to listen to port 4433 for SSL traffic.

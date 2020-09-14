@@ -20,7 +20,7 @@ The command deploys the Apache HTTP Server on the Kubernetes cluster with the de
 
 ## Uninstalling the Chart
 
-To uninstall `my-release`:
+To uninstall/delete `my-release`:
 
 ```console
 $ helm uninstall my-release
